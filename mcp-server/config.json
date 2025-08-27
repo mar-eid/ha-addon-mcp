@@ -1,6 +1,6 @@
 {
   "name": "MCP Server",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "slug": "mcp_server",
   "description": "MCP-server som henter historikk/statistikk fra Home Assistant/Recorder.",
   "arch": ["amd64", "aarch64"],

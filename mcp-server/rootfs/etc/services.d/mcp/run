@@ -1,0 +1,24 @@
+#!/usr/bin/with-contenv bashio
+set -euo pipefail
+
+# Les HA options via bashio
+pg_host=$(bashio::config 'pg_host')
+pg_port=$(bashio::config 'pg_port')
+pg_db=$(bashio::config 'pg_database')
+pg_user=$(bashio::config 'pg_user')
+pg_pass=$(bashio::config 'pg_password')
+read_only=$(bashio::config 'read_only')
+enable_ts=$(bashio::config 'enable_timescaledb')
+
+export PGHOST="$pg_host"
+export PGPORT="$pg_port"
+export PGDATABASE="$pg_db"
+export PGUSER="$pg_user"
+export PGPASSWORD="${pg_pass:-}"
+export MCP_READ_ONLY="$read_only"
+export MCP_ENABLE_TS="$enable_ts"
+export MCP_PORT="${MCP_PORT:-8099}"
+
+bashio::log.info "Starting MCP on port ${MCP_PORT} (read_only=${MCP_READ_ONLY}, timescaledb=${MCP_ENABLE_TS})"
+
+exec python3 /opt/mcp/server.py
