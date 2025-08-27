@@ -1,1 +1,5 @@
-
+{
+  "name": "MCP Add-ons",
+  "url": "https://github.com/OWNER/ha-addon-mcp",
+  "maintainer": "OWNER"
+}
