@@ -8,7 +8,7 @@ RUN apk add --no-cache python3 py3-pip bash jq curl
 # App
 WORKDIR /opt/mcp
 COPY server.py requirements.txt run.sh ./
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Helse
 ENV MCP_PORT=8099
