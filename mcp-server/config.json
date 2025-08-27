@@ -1,5 +1,6 @@
 {
   "name": "MCP Server",
+  "image": "ghcr.io/<brukernavn>/ha-addon-mcp-{arch}",
   "version": "0.1.0",
   "slug": "mcp_server",
   "description": "MCP-server som henter historikk/statistikk fra Home Assistant/Recorder.",
