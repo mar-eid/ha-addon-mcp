@@ -13,7 +13,13 @@ jobs:
       packages: write
     strategy:
       matrix:
-        arch: [amd64, arm64]
+        include:
+          - platform: linux/amd64
+            ha_arch: amd64
+            image_arch: amd64
+          - platform: linux/arm64
+            ha_arch: aarch64
+            image_arch: arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -34,11 +40,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./mcp-server
-          platforms: linux/${{ matrix.arch }}
+          platforms: ${{ matrix.platform }}
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/ha-addon-mcp-${{ matrix.arch }}:latest
-            ghcr.io/${{ github.repository_owner }}/ha-addon-mcp-${{ matrix.arch }}:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/ha-addon-mcp-${{ matrix.image_arch }}:latest
+            ghcr.io/${{ github.repository_owner }}/ha-addon-mcp-${{ matrix.image_arch }}:${{ github.sha }}
           build-args: |
-            BUILD_FROM=ghcr.io/home-assistant/${{ matrix.arch }}-base:3.19
-
+            BUILD_FROM=ghcr.io/home-assistant/${{ matrix.ha_arch }}-base:3.19
