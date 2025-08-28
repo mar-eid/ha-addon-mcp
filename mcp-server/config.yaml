@@ -1,14 +1,17 @@
-name: "MCP Server"
-version: "0.2.4"
+name: MCP Server
+version: "0.2.5"
 slug: mcp_server
-description: "Model Context Protocol server for querying Home Assistant historical data"
-url: "https://github.com/mar-eid/ha-addon-mcp"
+description: Model Context Protocol server for querying Home Assistant historical data
+url: https://github.com/mar-eid/ha-addon-mcp
 arch:
-  - amd64
+  - armhf
+  - armv7
   - aarch64
+  - amd64
+  - i386
 startup: services
 boot: auto
-init: true  # CRITICAL: Must be true for s6-overlay
+init: true
 stage: experimental
 hassio_api: true
 hassio_role: default
@@ -16,45 +19,40 @@ auth_api: true
 ingress: true
 ingress_port: 0
 panel_icon: mdi:database-search
-panel_title: "MCP Server"
-homeassistant: "2024.1.0"
+panel_title: MCP Server
+homeassistant: 2024.1.0
 
-# Repository image pattern
-image: "ghcr.io/mar-eid/ha-addon-mcp-{arch}"
+image: ghcr.io/mar-eid/ha-addon-mcp-{arch}
 
-# No external ports (using Ingress)
 ports: {}
+ports_description: {}
 
-# Map directories
 map:
   - config:rw
 
-# Service dependencies
 services:
   - postgresql:want
 
-# Add-on options
 options:
-  pg_host: "a0d7b954-postgresql"
+  pg_host: a0d7b954-postgresql
   pg_port: 5432
-  pg_database: "homeassistant"
-  pg_user: "homeassistant"
+  pg_database: homeassistant
+  pg_user: homeassistant
   pg_password: ""
   read_only: true
   enable_timescaledb: false
-  log_level: "info"
+  log_level: info
   query_timeout: 30
   max_query_days: 90
 
-# Schema validation
 schema:
-  pg_host: "str"
-  pg_port: "port"
-  pg_database: "str"
-  pg_user: "str"
-  pg_password: "password?"
-  read_only: "bool"
-  enable_timescaledb: "bool"
-  log_level: "list(debug|info|warning|error)?"
-  query_timeout: "int(5,300)?"
-  max_query_days: "int(1,365)?"
+  pg_host: str
+  pg_port: port
+  pg_database: str
+  pg_user: str
+  pg_password: password?
+  read_only: bool
+  enable_timescaledb: bool
+  log_level: list(debug|info|warning|error)?
+  query_timeout: int(5,300)?
+  max_query_days: int(1,365)?
