@@ -1,33 +1,76 @@
-{
-  "name": "MCP Server",
-  "version": "0.2.2",
-  "slug": "mcp_server",
-  "description": "MCP-server som henter historikk/statistikk fra Home Assistant/Recorder.",
-  "arch": ["amd64", "aarch64"],
-  "startup": "services",
-  "boot": "auto",
-  "ingress": true,
-  "ingress_port": 0,
-  "panel_icon": "mdi:database",
-  "homeassistant": "2024.0.0",
-  "image": "ghcr.io/mar-eid/ha-addon-mcp-{arch}",
-  "ports": {},
-  "options": {
-    "pg_host": "127.0.0.1",
-    "pg_port": 5432,
-    "pg_database": "homeassistant",
-    "pg_user": "ha_read",
-    "pg_password": "",
-    "read_only": true,
-    "enable_timescaledb": false
-  },
-  "schema": {
-    "pg_host": "str",
-    "pg_port": "int",
-    "pg_database": "str",
-    "pg_user": "str",
-    "pg_password": "str?",
-    "read_only": "bool",
-    "enable_timescaledb": "bool"
-  }
-}
+name: "MCP Server"
+version: "0.2.3"
+slug: mcp_server
+description: "Model Context Protocol server for querying Home Assistant historical data"
+url: "https://github.com/mar-eid/ha-addon-mcp"
+arch:
+  - amd64
+  - aarch64
+startup: services
+boot: auto
+init: false
+stage: experimental  # Should start as experimental
+hassio_api: true
+hassio_role: default
+auth_api: true
+ingress: true
+ingress_port: 0
+panel_icon: mdi:database-search
+panel_title: "MCP Server"
+homeassistant: "2024.1.0"
+
+# Repository image pattern
+image: "ghcr.io/mar-eid/ha-addon-mcp-{arch}"
+
+# No external ports (using Ingress)
+ports: {}
+ports_description: {}
+
+# Host access (if needed for database connections)
+host_network: false
+privileged: []
+full_access: false
+
+# Map directories
+map:
+  - config:rw
+
+# Service dependencies
+services:
+  - postgresql:want
+
+# Add-on options
+options:
+  pg_host: "a0d7b954-postgresql"  # Common HA PostgreSQL add-on name
+  pg_port: 5432
+  pg_database: "homeassistant"
+  pg_user: "homeassistant"
+  pg_password: ""
+  read_only: true
+  enable_timescaledb: false
+  log_level: "info"
+  query_timeout: 30
+  max_query_days: 90
+
+# Schema validation
+schema:
+  pg_host: "str"
+  pg_port: "port"
+  pg_database: "str"
+  pg_user: "str"
+  pg_password: "password?"
+  read_only: "bool"
+  enable_timescaledb: "bool"
+  log_level: "list(debug|info|warning|error)?"
+  query_timeout: "int(5,300)?"
+  max_query_days: "int(1,365)?"
+
+# Environment variables (if any)
+environment: {}
+
+# Labels for better organization
+labels:
+  - "database"
+  - "mcp"
+  - "historical-data"
+  - "statistics"

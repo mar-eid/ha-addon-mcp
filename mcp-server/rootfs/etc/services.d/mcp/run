@@ -1,21 +1,9 @@
-#!/command/with-contenv bashio
+#!/usr/bin/with-contenv bashio
 # ==============================================================================
 # Home Assistant Community Add-on: MCP Server
-# Runs the MCP server for historical data queries
 # ==============================================================================
 
-declare pg_host
-declare pg_port
-declare pg_database
-declare pg_user
-declare pg_password
-declare read_only
-declare enable_timescaledb
-declare log_level
-declare query_timeout
-declare max_query_days
-
-# Read configuration from add-on options
+# Read configuration
 pg_host=$(bashio::config 'pg_host')
 pg_port=$(bashio::config 'pg_port')
 pg_database=$(bashio::config 'pg_database')
@@ -23,56 +11,25 @@ pg_user=$(bashio::config 'pg_user')
 pg_password=$(bashio::config 'pg_password')
 read_only=$(bashio::config 'read_only')
 enable_timescaledb=$(bashio::config 'enable_timescaledb')
-log_level=$(bashio::config 'log_level')
-query_timeout=$(bashio::config 'query_timeout')
-max_query_days=$(bashio::config 'max_query_days')
 
-# Set log level
-bashio::log.level "${log_level}"
+bashio::log.info "Starting MCP Server..."
 
-bashio::log.info '-----------------------------------------------------------'
-bashio::log.info 'Starting MCP Server...'
-bashio::log.info '-----------------------------------------------------------'
-
-# Export database configuration
+# Export environment variables
 export PGHOST="${pg_host}"
 export PGPORT="${pg_port}"
 export PGDATABASE="${pg_database}"
 export PGUSER="${pg_user}"
 export PGPASSWORD="${pg_password}"
-
-# Export MCP configuration
 export MCP_READ_ONLY="${read_only}"
 export MCP_ENABLE_TIMESCALEDB="${enable_timescaledb}"
-export MCP_LOG_LEVEL="${log_level}"
-export MCP_QUERY_TIMEOUT="${query_timeout}"
-export MCP_MAX_QUERY_DAYS="${max_query_days}"
-
-# Ingress configuration - HA handles auth automatically
 export MCP_PORT="8099"
-export MCP_HOST="0.0.0.0"
 
-# Security: Home Assistant provides authentication via Ingress
-# No need for additional auth - HA handles it
-export DISABLE_AUTH="true"
+bashio::log.info "Database: ${pg_user}@${pg_host}:${pg_port}/${pg_database}"
 
-bashio::log.info "Configuration loaded:"
-bashio::log.info "- Database: ${pg_user}@${pg_host}:${pg_port}/${pg_database}"
-bashio::log.info "- Read Only: ${read_only}"
-bashio::log.info "- TimescaleDB: ${enable_timescaledb}"
-bashio::log.info "- Log Level: ${log_level}"
-bashio::log.info "- Query Timeout: ${query_timeout}s"
-bashio::log.info "- Max Query Days: ${max_query_days}"
-
-# Test database connection (non-blocking)
-if bashio::config.true 'read_only'; then
-    bashio::log.info "Testing database connection..."
-
-    # Use timeout to avoid hanging
-    if timeout 10 python3 -c "
+# Test database connection (quick test)
+bashio::log.info "Testing database connection..."
+if timeout 5 python3 -c "
 import psycopg2
-import sys
-import os
 try:
     conn = psycopg2.connect(
         host='${pg_host}',
@@ -80,29 +37,19 @@ try:
         database='${pg_database}',
         user='${pg_user}',
         password='${pg_password}',
-        connect_timeout=5
+        connect_timeout=3
     )
     conn.close()
-    print('Database connection successful')
+    print('✅ Database OK')
 except Exception as e:
-    print(f'Database connection failed: {e}')
-    sys.exit(1)
-" > /tmp/db_test.log 2>&1; then
-        bashio::log.info "✅ Database connection verified"
-        cat /tmp/db_test.log | bashio::log.info
-    else
-        bashio::log.warning "⚠️ Database connection failed - check configuration"
-        bashio::log.warning "Server will start with mock data fallback"
-        if [[ -f /tmp/db_test.log ]]; then
-            cat /tmp/db_test.log | bashio::log.warning
-        fi
-    fi
+    print(f'⚠️ Database failed: {e}')
+" 2>&1; then
+    bashio::log.info "Database test completed"
+else
+    bashio::log.warning "Database test failed - using mock data"
 fi
 
-# Wait for dependencies
-bashio::net.wait_for "${pg_host}" "${pg_port}" 30 || bashio::log.warning "Database host not reachable, continuing anyway..."
-
-bashio::log.info "Starting MCP Server on port ${MCP_PORT}..."
+bashio::log.info "Starting server on port ${MCP_PORT}..."
 
 # Start the server
 cd /app

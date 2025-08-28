@@ -5,7 +5,7 @@ build_from:
 args:
   BUILD_ARCH: "{arch}"
   BUILD_DATE: "{build_date}"
-  BUILD_DESCRIPTION: "MCP server for querying Home Assistant historical data"
+  BUILD_DESCRIPTION: "Model Context Protocol server for Home Assistant historical data"
   BUILD_NAME: "MCP Server"
   BUILD_REF: "{build_ref}"
   BUILD_REPOSITORY: "https://github.com/mar-eid/ha-addon-mcp"
@@ -13,6 +13,6 @@ args:
 
 labels:
   org.opencontainers.image.title: "MCP Server"
-  org.opencontainers.image.description: "MCP server for Home Assistant historical data queries"
+  org.opencontainers.image.description: "Model Context Protocol server for Home Assistant historical data"
   org.opencontainers.image.source: "https://github.com/mar-eid/ha-addon-mcp"
   org.opencontainers.image.licenses: "MIT"

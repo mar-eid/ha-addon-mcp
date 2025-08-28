@@ -1,1 +1,180 @@
-# ha-addon-mcp
+# Home Assistant Add-on: MCP Server
+
+[![GitHub Release][releases-shield]][releases]
+[![GitHub Activity][commits-shield]][commits]
+[![License][license-shield]][license]
+
+![Supports aarch64 Architecture][aarch64-shield]
+![Supports amd64 Architecture][amd64-shield]
+
+[![GitHub Sponsors][sponsors-shield]][sponsors]
+
+Model Context Protocol (MCP) server for querying Home Assistant historical data from PostgreSQL/TimescaleDB.
+
+## About
+
+This add-on runs an MCP server that provides AI assistants (like those using OpenAI through Home Assistant Assist) with access to your historical sensor data. It connects to your Home Assistant's PostgreSQL/TimescaleDB recorder database and exposes the data through standardized MCP tools.
+
+## Installation
+
+1. Navigate in your Home Assistant frontend to **Settings** → **Add-ons** → **Add-on Store**
+2. Click the 3-dots menu at the top right and select **Repositories**
+3. Add this repository URL: `https://github.com/mar-eid/ha-addon-mcp`
+4. Search for "MCP Server" and install the add-on
+5. Start the add-on
+
+## Configuration
+
+Add-on configuration:
+
+```yaml
+pg_host: "a0d7b954-postgresql"
+pg_port: 5432
+pg_database: "homeassistant"
+pg_user: "homeassistant"
+pg_password: "your_password"
+read_only: true
+enable_timescaledb: false
+log_level: "info"
+query_timeout: 30
+max_query_days: 90
+```
+
+### Option: `pg_host`
+
+The hostname or IP address of your PostgreSQL server.
+
+### Option: `pg_port`
+
+The port number of your PostgreSQL server (default: 5432).
+
+### Option: `pg_database`
+
+The name of your Home Assistant database (default: homeassistant).
+
+### Option: `pg_user`
+
+Username for database connection.
+
+### Option: `pg_password`
+
+Password for database connection (leave empty if using trust authentication).
+
+### Option: `read_only`
+
+Enable read-only mode to prevent any database modifications (recommended: true).
+
+### Option: `enable_timescaledb`
+
+Enable TimescaleDB-specific features if your database supports it.
+
+### Option: `log_level`
+
+Controls the level of log output (debug, info, warning, error).
+
+### Option: `query_timeout`
+
+Maximum time in seconds for database queries (5-300).
+
+### Option: `max_query_days`
+
+Maximum number of days that can be queried in a single request (1-365).
+
+## Usage
+
+After installation and configuration:
+
+1. Start the add-on
+2. Check the logs to ensure database connection is successful
+3. Open the Web UI to test the API endpoints
+4. Configure Home Assistant's MCP Client integration to use this server
+
+## Available API Endpoints
+
+- `GET /health` - Health check
+- `POST /tools/ha.get_history` - Query historical sensor data
+- `POST /tools/ha.get_statistics` - Get statistical summaries
+- `POST /tools/ha.get_statistics_bulk` - Bulk statistics queries
+
+## Security
+
+- Uses Home Assistant's built-in authentication via Ingress
+- Supports read-only database access
+- Configurable query limits to prevent abuse
+- No external ports exposed
+
+## Database Setup
+
+For enhanced security, create a dedicated read-only user:
+
+```sql
+CREATE USER ha_mcp_readonly WITH PASSWORD 'secure_password';
+GRANT CONNECT ON DATABASE homeassistant TO ha_mcp_readonly;
+GRANT USAGE ON SCHEMA public TO ha_mcp_readonly;
+GRANT SELECT ON states, states_meta, statistics, statistics_meta TO ha_mcp_readonly;
+```
+
+## Support
+
+Got questions?
+
+You have several options to get them answered:
+
+- The Home Assistant [Community Forum][forum]
+- Open an issue on our [GitHub][issue]
+
+## Contributing
+
+This is an active open-source project. We are always open to people who want to
+use the code or contribute to it.
+
+We have set up a separate document containing our
+[contribution guidelines](CONTRIBUTING.md).
+
+Thank you for being involved! :heart_eyes:
+
+## Authors & contributors
+
+This repository is owned and maintained by [mar-eid][mar-eid].
+
+For a full list of all authors and contributors,
+check [the contributor's page][contributors].
+
+## License
+
+MIT License
+
+Copyright (c) 2024 mar-eid
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+[aarch64-shield]: https://img.shields.io/badge/aarch64-yes-green.svg
+[amd64-shield]: https://img.shields.io/badge/amd64-yes-green.svg
+[commits-shield]: https://img.shields.io/github/commit-activity/y/mar-eid/ha-addon-mcp.svg
+[commits]: https://github.com/mar-eid/ha-addon-mcp/commits/main
+[contributors]: https://github.com/mar-eid/ha-addon-mcp/graphs/contributors
+[forum]: https://community.home-assistant.io
+[issue]: https://github.com/mar-eid/ha-addon-mcp/issues
+[license]: https://github.com/mar-eid/ha-addon-mcp/blob/main/LICENSE
+[license-shield]: https://img.shields.io/github/license/mar-eid/ha-addon-mcp.svg
+[mar-eid]: https://github.com/mar-eid
+[releases-shield]: https://img.shields.io/github/release/mar-eid/ha-addon-mcp.svg
+[releases]: https://github.com/mar-eid/ha-addon-mcp/releases
+[sponsors]: https://github.com/sponsors/mar-eid
+[sponsors-shield]: https://img.shields.io/github/sponsors/mar-eid?label=Sponsors
