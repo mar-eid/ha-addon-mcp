@@ -1,18 +1,26 @@
-
 ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.19
 FROM ${BUILD_FROM}
 
-# Pakker
-RUN apk add --no-cache python3 py3-pip bash jq curl
+# System packages
+RUN apk add --no-cache \
+    postgresql-dev \
+    gcc \
+    musl-dev \
+    python3-dev \
+    bash \
+    jq \
+    curl
 
-# App
+# Fix PEP 668 issue by using --break-system-packages (safe in containers)
 WORKDIR /opt/mcp
-COPY server.py requirements.txt run.sh ./
-RUN pip3 install --no-cache-dir -r requirements.txt
+COPY server.py requirements.txt ./
 
-# Helse
+# Install Python packages (bypass PEP 668 in container)
+RUN pip3 install --break-system-packages --no-cache-dir -r requirements.txt
+
+# Copy s6 services (use your existing structure)
+COPY rootfs/ /
+
+# Healthcheck
 ENV MCP_PORT=8099
-HEALTHCHECK CMD wget -qO- http://127.0.0.1:${MCP_PORT}/health || exit 1
-
-RUN chmod +x /opt/mcp/run.sh
-CMD [ "/opt/mcp/run.sh" ]
+HEALTHCHECK CMD curl -f http://127.0.0.1:${MCP_PORT}/health || exit 1
