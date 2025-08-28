@@ -1,5 +1,5 @@
 name: "MCP Server"
-version: "0.2.3"
+version: "0.2.4"
 slug: mcp_server
 description: "Model Context Protocol server for querying Home Assistant historical data"
 url: "https://github.com/mar-eid/ha-addon-mcp"
@@ -8,8 +8,8 @@ arch:
   - aarch64
 startup: services
 boot: auto
-init: false
-stage: experimental  # Should start as experimental
+init: true  # CRITICAL: Must be true for s6-overlay
+stage: experimental
 hassio_api: true
 hassio_role: default
 auth_api: true
@@ -24,12 +24,6 @@ image: "ghcr.io/mar-eid/ha-addon-mcp-{arch}"
 
 # No external ports (using Ingress)
 ports: {}
-ports_description: {}
-
-# Host access (if needed for database connections)
-host_network: false
-privileged: []
-full_access: false
 
 # Map directories
 map:
@@ -41,7 +35,7 @@ services:
 
 # Add-on options
 options:
-  pg_host: "a0d7b954-postgresql"  # Common HA PostgreSQL add-on name
+  pg_host: "a0d7b954-postgresql"
   pg_port: 5432
   pg_database: "homeassistant"
   pg_user: "homeassistant"
@@ -64,13 +58,3 @@ schema:
   log_level: "list(debug|info|warning|error)?"
   query_timeout: "int(5,300)?"
   max_query_days: "int(1,365)?"
-
-# Environment variables (if any)
-environment: {}
-
-# Labels for better organization
-labels:
-  - "database"
-  - "mcp"
-  - "historical-data"
-  - "statistics"

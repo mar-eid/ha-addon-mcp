@@ -4,12 +4,13 @@ FROM $BUILD_FROM
 # Set shell for better error handling
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Install system dependencies in one layer
+# Install system dependencies (no version pinning - let Alpine handle it)
 RUN apk add --no-cache \
-    postgresql-dev=15.4-r0 \
-    gcc=12.2.1_git20220924-r10 \
-    musl-dev=1.2.4-r2 \
-    python3-dev=3.11.6-r1
+    postgresql-dev \
+    gcc \
+    musl-dev \
+    python3-dev \
+    py3-pip
 
 # Create app directory
 WORKDIR /app
@@ -17,12 +18,9 @@ WORKDIR /app
 # Copy Python requirements
 COPY requirements.txt /tmp/requirements.txt
 
-# Install Python packages using the method recommended by HA guidelines
-RUN \
-    pip3 install --no-cache-dir --find-links \
-    "https://wheels.home-assistant.io/alpine-$(cut -d '.' -f 1-2 /etc/alpine-release)/" \
-    -r /tmp/requirements.txt \
-    && rm -rf /tmp/requirements.txt
+# Install Python packages - use simple pip approach that works
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt && \
+    rm -rf /tmp/requirements.txt
 
 # Copy application code
 COPY server.py ./
