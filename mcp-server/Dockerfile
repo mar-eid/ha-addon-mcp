@@ -1,62 +1,25 @@
 ARG BUILD_FROM
 FROM $BUILD_FROM
 
-# Set shell for better error handling
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-# Install system dependencies (no version pinning - let Alpine handle it)
-RUN apk add --no-cache \
-    postgresql-dev \
-    gcc \
-    musl-dev \
-    python3-dev \
-    py3-pip
+# Install minimal system dependencies
+RUN apk add --no-cache python3 py3-pip
 
 # Create app directory
 WORKDIR /app
 
-# Copy Python requirements
-COPY requirements.txt /tmp/requirements.txt
+# Copy and install Python packages with debugging
+COPY requirements.txt ./
+RUN echo "=== Installing Python packages ===" && \
+    cat requirements.txt && \
+    echo "=== Using pip3 with break-system-packages ===" && \
+    pip3 install --break-system-packages --no-cache-dir -r requirements.txt && \
+    echo "=== Installation successful ==="
 
-# Install Python packages - use simple pip approach that works
-RUN pip3 install --no-cache-dir -r /tmp/requirements.txt && \
-    rm -rf /tmp/requirements.txt
-
-# Copy application code
+# Copy application
 COPY server.py ./
 
-# Copy root filesystem
+# Copy services
 COPY rootfs /
 
-# Build arguments (provided by Home Assistant Builder)
-ARG BUILD_ARCH
-ARG BUILD_DATE
-ARG BUILD_DESCRIPTION
-ARG BUILD_NAME
-ARG BUILD_REF
-ARG BUILD_REPOSITORY
-ARG BUILD_VERSION
-
-# Labels following HA guidelines
-LABEL \
-    io.hass.name="${BUILD_NAME}" \
-    io.hass.description="${BUILD_DESCRIPTION}" \
-    io.hass.arch="${BUILD_ARCH}" \
-    io.hass.type="addon" \
-    io.hass.version=${BUILD_VERSION} \
-    maintainer="mar-eid" \
-    org.opencontainers.image.title="${BUILD_NAME}" \
-    org.opencontainers.image.description="${BUILD_DESCRIPTION}" \
-    org.opencontainers.image.vendor="Home Assistant Community Add-ons" \
-    org.opencontainers.image.authors="mar-eid" \
-    org.opencontainers.image.licenses="MIT" \
-    org.opencontainers.image.url="https://github.com/mar-eid/ha-addon-mcp" \
-    org.opencontainers.image.source="https://github.com/mar-eid/ha-addon-mcp" \
-    org.opencontainers.image.documentation="https://github.com/mar-eid/ha-addon-mcp/blob/main/README.md" \
-    org.opencontainers.image.created=${BUILD_DATE} \
-    org.opencontainers.image.revision=${BUILD_REF} \
-    org.opencontainers.image.version=${BUILD_VERSION}
-
-# Healthcheck (optional but recommended)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --quiet --tries=1 --spider http://localhost:8099/health || exit 1
+# Simple healthcheck
+HEALTHCHECK CMD python3 -c "import requests; requests.get('http://localhost:8099/health')" || exit 1
