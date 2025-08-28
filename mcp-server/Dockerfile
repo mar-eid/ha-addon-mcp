@@ -1,26 +1,33 @@
 ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.19
 FROM ${BUILD_FROM}
 
-# System packages
+# Install system dependencies
 RUN apk add --no-cache \
     postgresql-dev \
     gcc \
     musl-dev \
     python3-dev \
-    bash \
-    jq \
-    curl
+    py3-pip
 
-# Fix PEP 668 issue by using --break-system-packages (safe in containers)
-WORKDIR /opt/mcp
-COPY server.py requirements.txt ./
+# Copy requirements first for better caching
+COPY requirements.txt /tmp/requirements.txt
 
-# Install Python packages (bypass PEP 668 in container)
-RUN pip3 install --break-system-packages --no-cache-dir -r requirements.txt
+# Create virtual environment and install packages
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-# Copy s6 services (use your existing structure)
+# Working directory (matches what your s6 script expects)
+WORKDIR /app
+COPY server.py ./
+
+# Copy s6 services
 COPY rootfs/ /
+
+# Set environment for the virtual environment
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Healthcheck
 ENV MCP_PORT=8099
-HEALTHCHECK CMD curl -f http://127.0.0.1:${MCP_PORT}/health || exit 1
+HEALTHCHECK CMD wget -qO- http://127.0.0.1:${MCP_PORT}/health || exit 1
