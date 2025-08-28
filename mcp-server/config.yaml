@@ -19,7 +19,7 @@ panel_icon: mdi:database-search
 panel_title: MCP Server
 homeassistant: 2024.1.0
 
-image: ghcr.io/mar-eid/ha-addon-mcp-{arch}
+# image: ghcr.io/mar-eid/ha-addon-mcp-{arch}
 
 ports: {}
 ports_description: {}
