@@ -27,9 +27,6 @@ ports:
 map:
   - config:rw
 
-services:
-  - postgresql:want
-
 options:
   pg_host: a0d7b954-postgresql
   pg_port: 5432
