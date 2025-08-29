@@ -21,7 +21,7 @@ from psycopg2.extras import RealDictCursor
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Home Assistant MCP Server", version="0.3.4")
+app = FastAPI(title="Home Assistant MCP Server", version="0.3.5")
 
 # Configuration from environment
 READ_ONLY = os.getenv("MCP_READ_ONLY", "true").lower() == "true"
@@ -398,7 +398,7 @@ def handle_addon_health(params: Dict[str, Any]) -> MCPToolResult:
         
         result = {
             "addon_status": "running",
-            "version": "0.3.4",
+            "version": "0.3.5",
             "database_connected": db_connected,
             "database_config": {
                 "host": DB_CONFIG["host"],
@@ -573,7 +573,7 @@ async def handle_mcp_request(request: MCPRequest) -> MCPResponse:
                     "protocolVersion": "2024-11-05",
                     "serverInfo": {
                         "name": "Home Assistant MCP Server",
-                        "version": "0.3.4"
+                        "version": "0.3.5"
                     },
                     "capabilities": {
                         "tools": {}
@@ -648,7 +648,7 @@ def health():
     
     return {
         "status": "healthy",
-        "version": "0.3.4",
+        "version": "0.3.5",
         "database": db_status,
         "read_only": READ_ONLY,
         "timescaledb": ENABLE_TIMESCALEDB,
@@ -671,7 +671,7 @@ def root():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Home Assistant MCP Server v0.3.4</title>
+        <title>Home Assistant MCP Server v0.3.5</title>
         <style>
             body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; background: #f5f5f5; }}
             .header {{ background: linear-gradient(135deg, #1976d2, #42a5f5); color: white; padding: 20px 40px; }}
@@ -694,7 +694,7 @@ def root():
     </head>
     <body>
         <div class="header">
-            <h1>🤖 Home Assistant MCP Server v0.3.4</h1>
+            <h1>🤖 Home Assistant MCP Server v0.3.5</h1>
             <p>Model Context Protocol server for querying Home Assistant historical data</p>
         </div>
         
@@ -734,7 +734,7 @@ def root():
                     <button onclick="clearOutput()">Clear Output</button>
                     
                     <div class="output" id="testOutput">
-                        Welcome to Home Assistant MCP Server v0.3.4!
+                        Welcome to Home Assistant MCP Server v0.3.5!
                         
                         Ready to serve historical data to AI assistants via MCP protocol.
                         Click test buttons above to verify functionality.
@@ -847,7 +847,7 @@ def root():
     """)
 
 if __name__ == "__main__":
-    logger.info("🚀 Starting Home Assistant MCP Server v0.3.4...")
+    logger.info("🚀 Starting Home Assistant MCP Server v0.3.5...")
     logger.info(f"📊 Database: {DB_CONFIG['user']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
     logger.info(f"🔒 Read-only mode: {READ_ONLY}")
     logger.info(f"⚡ TimescaleDB: {ENABLE_TIMESCALEDB}")

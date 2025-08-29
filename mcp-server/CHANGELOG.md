@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2025-08-29
+
+### Fixed
+- **🔧 Container Caching Issue**: Bumped version to force rebuild and prevent cached container usage
+- **📦 Docker Image Update**: Ensured latest code is used instead of cached v0.3.0 image
+
+### Technical Details
+- Fixed issue where Home Assistant was using old cached Docker images
+- Updated all version references to 0.3.5 to force container rebuild
+- Resolved persistent "SyntaxError: 'break' outside loop" from cached code
+
 ## [0.3.4] - 2025-08-29
 
 ### Fixed

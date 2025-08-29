@@ -1,5 +1,5 @@
 name: MCP Server
-version: "0.3.4"
+version: "0.3.5"
 slug: mcp_server
 description: Model Context Protocol server for querying Home Assistant historical data
 url: https://github.com/mar-eid/ha-addon-mcp
