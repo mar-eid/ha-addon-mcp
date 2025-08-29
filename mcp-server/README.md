@@ -89,12 +89,38 @@ After installation and configuration:
 3. Open the Web UI to test the API endpoints
 4. Configure Home Assistant's MCP Client integration to use this server
 
-## Available API Endpoints
+## Home Assistant MCP Integration Setup
 
-- `GET /health` - Health check
-- `POST /tools/ha.get_history` - Query historical sensor data
-- `POST /tools/ha.get_statistics` - Get statistical summaries
-- `POST /tools/ha.get_statistics_bulk` - Bulk statistics queries
+To enable AI assistants to use this server:
+
+1. **Install MCP Integration**: Go to Settings → Devices & Services → Add Integration
+2. **Search for**: "Model Context Protocol"
+3. **Configure Server URL**: Use your add-on's URL:
+   ```
+   http://localhost:8099/mcp
+   ```
+   Or if using Ingress: use the internal add-on URL
+4. **Test Connection**: The integration will automatically discover available tools
+5. **Use with Assist**: Ask questions like:
+   - "What was the temperature yesterday?"
+   - "Show me energy consumption for the past week"
+   - "List all sensors with historical data"
+
+## Available MCP Tools
+
+The add-on provides 5 MCP tools for AI assistants:
+
+- `ha.get_history` - Get historical state data for entities over time periods
+- `ha.get_statistics` - Get statistical summaries (mean, min, max, sum) for entities  
+- `ha.list_entities` - List available entities that have historical data
+- `ha.list_statistics` - List available statistics in the database
+- `addon.health` - Get server health status and database connectivity
+
+## API Endpoints
+
+- `POST /mcp` - Main MCP protocol endpoint (JSON-RPC 2.0)
+- `GET /health` - Health check and status
+- `GET /` - Web interface for testing and setup instructions
 
 ## Security
 

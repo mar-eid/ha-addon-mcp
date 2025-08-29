@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2025-08-29
+
+### Fixed
+- **⚠️ Critical Syntax Error**: Resolved Python syntax error causing "'break' outside loop" crash on startup
+- **🔧 Enhanced Error Handling**: Improved database connection error handling and fallback logic
+- **📊 Better Mock Data**: Enhanced mock data generation for more realistic testing when DB unavailable
+- **🔍 Query Robustness**: Added better validation and error handling for database queries
+- **📝 Improved Logging**: Enhanced logging throughout application for better debugging
+
+### Changed
+- **🏗️ Complete Code Refactor**: Cleaned up entire server.py for better maintainability
+- **📋 Enhanced Web UI**: Improved testing interface with better error handling
+- **🎯 Better Tool Descriptions**: More detailed descriptions for all MCP tools
+- **⚙️ Container Configuration**: Fixed startup settings in config.yaml (services, init: true)
+
+### Added
+- **🧪 Enhanced Testing**: Better test interface with more comprehensive tool testing
+- **📊 Database Status**: More detailed health reporting for database connectivity
+- **🔄 Graceful Fallbacks**: Better handling when database is unavailable
+- **📖 Setup Instructions**: Enhanced setup documentation in web interface
+
+### Technical Details
+- Fixed Python syntax errors that prevented server startup
+- Enhanced database connection pooling and error recovery
+- Improved MCP protocol compliance and error responses
+- Better handling of edge cases in data queries
+- Enhanced configuration validation
+
 ## [0.3.3] - 2025-08-29
 
 ### Fixed
