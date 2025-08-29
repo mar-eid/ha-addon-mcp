@@ -24,9 +24,6 @@ image: ghcr.io/mar-eid/ha-addon-mcp-{arch}
 ports:
   8099/tcp: null
 
-ports_description:
-  8099/tcp: "MCP Server HTTP API (used by Ingress)"
-
 map:
   - config:rw
 
