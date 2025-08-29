@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2025-08-29
+
+### Fixed
+- **🔧 Protocol Compliance**: Implemented correct single `/mcp` endpoint per MCP specification
+- **📡 SSE Transport**: Fixed SSE client connection issues with Home Assistant MCP integration
+- **🔗 Endpoint Detection**: Added proper `endpoint` event emission for transport auto-detection
+- **⚙️ Message Handling**: Corrected JSON-RPC 2.0 request/response format
+
+### Changed
+- **🎯 Single Endpoint Architecture**: Replaced separate `/sse` and `/message` with unified `/mcp`
+- **📋 Enhanced Testing**: Updated Web UI with corrected endpoint testing
+- **🔍 Protocol Validation**: Stricter adherence to MCP 2024-11-05 specification
+
+### Technical Details
+- Fixed `sse_client` connection failures in Home Assistant MCP integration
+- Proper `text/event-stream` content type for SSE responses
+- Enhanced CORS headers for cross-origin requests
+- Correct endpoint announcement for transport negotiation
+
 ## [0.3.2] - 2025-08-29
 
 ### 🎯 Major Update: Home Assistant MCP Integration Compatibility
