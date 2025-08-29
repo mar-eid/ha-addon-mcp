@@ -14,7 +14,7 @@ import json
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Home Assistant MCP Server", version="0.2.6")
+app = FastAPI(title="Home Assistant MCP Server", version="0.3.0")
 
 # Configuration from environment
 READ_ONLY = os.getenv("MCP_READ_ONLY", "true").lower() == "true"
@@ -207,7 +207,7 @@ def root():
     """Root endpoint - Web UI"""
     return {
         "name": "Home Assistant MCP Server",
-        "version": "0.2.6",
+        "version": "0.3.0",
         "description": "Model Context Protocol server for Home Assistant historical data",
         "endpoints": {
             "health": "/health",

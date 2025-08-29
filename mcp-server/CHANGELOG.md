@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-08-29
+
+### 🎉 Major Milestone: Working Home Assistant Add-on Store Integration
+
+### Added
+- **Full PostgreSQL Database Integration**: Real database queries replace mock data
+- **Complete MCP Protocol Support**: Added `/mcp/call_tool` endpoint for AI assistants
+- **Enhanced API Endpoints**: Comprehensive tool set for historical data access
+- **Proper Error Handling**: Robust database connection management with fallbacks
+- **Health Monitoring**: Detailed health checks and status reporting
+- **Repository Compatibility**: Added `repository.json` for better HA store integration
+
+### Fixed
+- **⚠️ Critical**: Removed invalid `postgresql:want` service that prevented add-on detection
+- **Container Build**: Fixed Docker health check using `curl` instead of missing dependencies
+- **Configuration Schema**: Corrected port mapping and ingress configuration
+- **File Structure**: Moved `build.yaml` to correct location inside add-on folder
+- **Logging**: Added comprehensive logging throughout the application
+
+### Changed
+- **Database Queries**: Implemented real Home Assistant recorder table queries
+- **Response Format**: Standardized MCP-compatible JSON responses
+- **Configuration**: Simplified and validated all config options
+- **Documentation**: Updated README with proper installation instructions
+
+### Technical Details
+- Now properly queries `states`, `states_meta`, `statistics`, and `statistics_meta` tables
+- Graceful fallback to mock data when database is unavailable
+- Full MCP protocol compliance for AI assistant integration
+- Enhanced container labels and build arguments
+- Proper Home Assistant Ingress integration
+
+### Migration Notes
+- This version requires PostgreSQL database access configured in options
+- Add-on is now visible in Home Assistant Add-on Store
+- Compatible with official Home Assistant MCP Client integration
+
+
+---
+
 ## [0.2.4] - 2024-08-28
 
 ### Fixed
