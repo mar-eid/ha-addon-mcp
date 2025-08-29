@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any, Union
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse, HTMLResponse
 from pydantic import BaseModel, Field
 import uvicorn
@@ -15,7 +15,7 @@ from psycopg2.extras import RealDictCursor
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Home Assistant MCP Server", version="0.3.2")
+app = FastAPI(title="Home Assistant MCP Server", version="0.3.3")
 
 # Configuration from environment
 READ_ONLY = os.getenv("MCP_READ_ONLY", "true").lower() == "true"
@@ -32,11 +32,6 @@ DB_CONFIG = {
 }
 
 # MCP Protocol Models
-class MCPTool(BaseModel):
-    name: str
-    description: str
-    inputSchema: Dict[str, Any]
-
 class MCPRequest(BaseModel):
     jsonrpc: str = "2.0"
     id: Union[str, int]
@@ -214,7 +209,7 @@ def get_available_statistics(limit: int = 50):
     finally:
         conn.close()
 
-# MCP Tool Implementations
+# MCP Tool Handlers
 def handle_get_history(params: Dict[str, Any]) -> MCPToolResult:
     """Handle ha.get_history tool calls"""
     try:
@@ -378,11 +373,6 @@ MCP_TOOLS = {
                 "end": {
                     "type": "string", 
                     "description": "End time in ISO format (e.g., 2024-01-02T00:00:00Z)"
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of data points to return",
-                    "default": 1000
                 }
             },
             "required": ["entity_id", "start", "end"]
@@ -463,71 +453,132 @@ MCP_TOOLS = {
     }
 }
 
-# SSE Transport Endpoints (Required by Home Assistant MCP Integration)
-
-@app.get("/sse")
-async def sse_endpoint():
-    """Main SSE endpoint for MCP protocol - Required by Home Assistant integration"""
+# Single MCP Endpoint (Correct Protocol Implementation)
+@app.get("/mcp")
+@app.post("/mcp")
+async def mcp_endpoint(request: Request):
+    """
+    Single MCP endpoint that handles both GET (SSE) and POST (messages)
+    This is the correct implementation per MCP specification
+    """
     
-    async def event_stream():
-        # Send initial connection message
-        init_msg = {
-            "jsonrpc": "2.0", 
-            "method": "notifications/initialized",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "serverInfo": {
-                    "name": "Home Assistant MCP Server",
-                    "version": "0.3.2"
-                },
-                "capabilities": {
-                    "tools": {}
-                }
-            }
-        }
-        yield f"data: {json.dumps(init_msg)}\n\n"
-        
-        # Keep connection alive with periodic pings
-        while True:
+    if request.method == "GET":
+        # SSE endpoint - return event stream
+        async def sse_stream():
             try:
-                ping_msg = {
+                # Send endpoint event to indicate SSE transport capability
+                endpoint_event = {
                     "jsonrpc": "2.0",
-                    "method": "notifications/ping",
+                    "method": "endpoint",
                     "params": {
-                        "timestamp": datetime.utcnow().isoformat() + "Z"
+                        "endpoint": {
+                            "method": "POST",
+                            "path": "/mcp"
+                        }
                     }
                 }
-                yield f"data: {json.dumps(ping_msg)}\n\n"
-                await asyncio.sleep(30)  # Ping every 30 seconds
+                yield f"data: {json.dumps(endpoint_event)}\n\n"
                 
+                # Send initialization
+                init_event = {
+                    "jsonrpc": "2.0", 
+                    "method": "notifications/initialized",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "serverInfo": {
+                            "name": "Home Assistant MCP Server",
+                            "version": "0.3.3"
+                        },
+                        "capabilities": {
+                            "tools": {}
+                        }
+                    }
+                }
+                yield f"data: {json.dumps(init_event)}\n\n"
+                
+                # Keep connection alive with pings
+                while True:
+                    ping_event = {
+                        "jsonrpc": "2.0",
+                        "method": "notifications/ping",
+                        "params": {
+                            "timestamp": datetime.utcnow().isoformat() + "Z"
+                        }
+                    }
+                    yield f"data: {json.dumps(ping_event)}\n\n"
+                    await asyncio.sleep(30)
+                    
             except asyncio.CancelledError:
+                logger.info("SSE client disconnected")
                 break
             except Exception as e:
                 logger.error(f"SSE stream error: {e}")
                 break
+        
+        return StreamingResponse(
+            sse_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST",
+                "Access-Control-Allow-Headers": "Accept, Authorization, Content-Type"
+            }
+        )
     
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/plain",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET",
-            "Access-Control-Allow-Headers": "Accept, Authorization"
-        }
-    )
+    elif request.method == "POST":
+        # Handle MCP messages
+        try:
+            request_data = await request.json()
+            
+            # Handle single request or batch
+            if isinstance(request_data, list):
+                # Batch request
+                responses = []
+                for req in request_data:
+                    mcp_req = MCPRequest(**req)
+                    response = await handle_mcp_request(mcp_req)
+                    responses.append(response.dict())
+                return responses
+            else:
+                # Single request
+                mcp_req = MCPRequest(**request_data)
+                response = await handle_mcp_request(mcp_req)
+                return response.dict()
+                
+        except Exception as e:
+            logger.error(f"Error processing MCP request: {e}")
+            return MCPResponse(
+                id="error",
+                error={
+                    "code": -32700,
+                    "message": f"Parse error: {str(e)}"
+                }
+            ).dict()
 
-@app.post("/message")
-async def handle_mcp_message(request: MCPRequest):
-    """Handle MCP protocol messages - Required by Home Assistant integration"""
-    
+async def handle_mcp_request(request: MCPRequest) -> MCPResponse:
+    """Handle individual MCP requests"""
     try:
         method = request.method
         params = request.params or {}
         
-        if method == "tools/list":
-            # Return list of available tools
+        if method == "initialize":
+            return MCPResponse(
+                id=request.id,
+                result={
+                    "protocolVersion": "2024-11-05",
+                    "serverInfo": {
+                        "name": "Home Assistant MCP Server",
+                        "version": "0.3.3"
+                    },
+                    "capabilities": {
+                        "tools": {}
+                    }
+                }
+            )
+        
+        elif method == "tools/list":
             tools = []
             for tool_name, tool_info in MCP_TOOLS.items():
                 tools.append({
@@ -542,7 +593,6 @@ async def handle_mcp_message(request: MCPRequest):
             )
         
         elif method == "tools/call":
-            # Handle tool calls
             tool_name = params.get("name")
             tool_args = params.get("arguments", {})
             
@@ -564,22 +614,6 @@ async def handle_mcp_message(request: MCPRequest):
                 result=result.dict()
             )
         
-        elif method == "initialize":
-            # Initialize MCP session
-            return MCPResponse(
-                id=request.id,
-                result={
-                    "protocolVersion": "2024-11-05",
-                    "serverInfo": {
-                        "name": "Home Assistant MCP Server",
-                        "version": "0.3.2"
-                    },
-                    "capabilities": {
-                        "tools": {}
-                    }
-                }
-            )
-        
         else:
             return MCPResponse(
                 id=request.id,
@@ -590,7 +624,7 @@ async def handle_mcp_message(request: MCPRequest):
             )
             
     except Exception as e:
-        logger.error(f"MCP message handling error: {e}")
+        logger.error(f"Error handling MCP request: {e}")
         return MCPResponse(
             id=request.id,
             error={
@@ -599,8 +633,7 @@ async def handle_mcp_message(request: MCPRequest):
             }
         )
 
-# Standard HTTP API Endpoints (for backwards compatibility)
-
+# Health endpoint
 @app.get("/health")
 def health():
     """Health check endpoint"""
@@ -614,13 +647,15 @@ def health():
         "database": db_status,
         "read_only": READ_ONLY,
         "timescaledb": ENABLE_TIMESCALEDB,
-        "mcp_version": "2024-11-05",
+        "mcp_endpoint": "/mcp",
+        "protocol_version": "2024-11-05",
         "timestamp": datetime.utcnow().isoformat() + "Z"
     }
 
+# Root endpoint with testing interface
 @app.get("/")
 def root():
-    """Root endpoint - API documentation"""
+    """Root endpoint with testing interface"""
     conn = get_db_connection()
     db_status = "connected" if conn else "disconnected"
     if conn:
@@ -639,51 +674,123 @@ def root():
             .warning {{ background-color: #fff3cd; color: #856404; }}
             h1 {{ color: #1976d2; }}
             .endpoint {{ background: #f8f9fa; padding: 10px; margin: 10px 0; border-left: 4px solid #1976d2; }}
-            .tools {{ margin: 20px 0; }}
-            .tool {{ background: #e7f3ff; padding: 10px; margin: 5px 0; border-radius: 4px; }}
+            .test-section {{ background: #fff3e0; padding: 15px; border-radius: 4px; margin: 20px 0; }}
+            .sse-output {{ background: #000; color: #00ff00; padding: 15px; border-radius: 4px; font-family: monospace; height: 200px; overflow-y: auto; }}
+            .url {{ background: #f0f0f0; padding: 5px; border-radius: 4px; font-family: monospace; }}
+            button {{ background: #1976d2; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }}
+            button:hover {{ background: #1565c0; }}
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>🤖 Home Assistant MCP Server v0.3.2</h1>
+            <h1>🤖 Home Assistant MCP Server v0.3.3</h1>
             
             <div class="status {'healthy' if db_status == 'connected' else 'warning'}">
                 <strong>Status:</strong> Running | <strong>Database:</strong> {db_status} | <strong>Read-only:</strong> {READ_ONLY}
             </div>
             
-            <h2>📡 MCP Protocol Endpoints</h2>
-            <div class="endpoint"><strong>GET /sse</strong> - SSE transport endpoint (for Home Assistant integration)</div>
-            <div class="endpoint"><strong>POST /message</strong> - MCP message handler</div>
-            
-            <h2>🛠️ Available MCP Tools</h2>
-            <div class="tools">
-                <div class="tool"><strong>ha.get_history</strong> - Get historical entity data</div>
-                <div class="tool"><strong>ha.get_statistics</strong> - Get statistical data for entities</div>
-                <div class="tool"><strong>ha.list_entities</strong> - List available entities</div>
-                <div class="tool"><strong>ha.list_statistics</strong> - List available statistics</div>
-                <div class="tool"><strong>addon.health</strong> - Get server health status</div>
+            <div class="test-section">
+                <h2>🧪 Live MCP Endpoint Test</h2>
+                <p><strong>MCP Endpoint URL:</strong></p>
+                <div class="url">http://localhost:8099/mcp</div>
+                <br>
+                <button onclick="testSSE()">Test SSE Stream (GET /mcp)</button>
+                <button onclick="testTools()">Test Tools List (POST /mcp)</button>
+                <button onclick="stopTest()">Stop Test</button>
+                <div class="sse-output" id="testOutput">Click a test button to see results...</div>
             </div>
             
-            <h2>🔗 Configuration</h2>
-            <p>To use with Home Assistant MCP integration:</p>
-            <ol>
-                <li>Install the <strong>Model Context Protocol</strong> integration</li>
-                <li>Configure SSE endpoint: <code>http://localhost:8099/sse</code></li>
-                <li>Tools will be available for conversation agents</li>
-            </ol>
+            <h2>📡 MCP Protocol Endpoint</h2>
+            <div class="endpoint"><strong>GET|POST /mcp</strong> - Single MCP endpoint (SSE + Messages)</div>
             
-            <p><em>Compatible with Home Assistant MCP Integration using SSE transport protocol</em></p>
+            <h2>🔗 Home Assistant MCP Integration Setup</h2>
+            <div class="test-section">
+                <p><strong>1. Install Integration:</strong> Settings → Devices & Services → Add Integration → "Model Context Protocol"</p>
+                <p><strong>2. Configure Server URL:</strong></p>
+                <div class="url">http://localhost:8099/mcp</div>
+                <p><strong>3. Available Tools:</strong> ha.get_history, ha.get_statistics, ha.list_entities, ha.list_statistics, addon.health</p>
+            </div>
+            
+            <h2>🔗 Manual Testing</h2>
+            <div class="endpoint"><strong>Health Check:</strong> <a href="/health" target="_blank">/health</a></div>
+            <div class="endpoint"><strong>SSE Stream:</strong> <a href="/mcp" target="_blank">/mcp</a></div>
         </div>
+        
+        <script>
+            let eventSource = null;
+            
+            function testSSE() {{
+                const output = document.getElementById('testOutput');
+                output.innerHTML = '🔄 Testing SSE stream (GET /mcp)...\\n';
+                
+                if (eventSource) {{
+                    eventSource.close();
+                }}
+                
+                eventSource = new EventSource('/mcp');
+                
+                eventSource.onopen = function(event) {{
+                    output.innerHTML += '✅ SSE connection opened\\n';
+                }};
+                
+                eventSource.onmessage = function(event) {{
+                    const timestamp = new Date().toLocaleTimeString();
+                    try {{
+                        const data = JSON.parse(event.data);
+                        output.innerHTML += `[${timestamp}] ${{JSON.stringify(data, null, 2)}}\\n`;
+                    }} catch(e) {{
+                        output.innerHTML += `[${timestamp}] Raw: ${{event.data}}\\n`;
+                    }}
+                    output.scrollTop = output.scrollHeight;
+                }};
+                
+                eventSource.onerror = function(event) {{
+                    output.innerHTML += '❌ SSE connection error\\n';
+                }};
+            }}
+            
+            function testTools() {{
+                const output = document.getElementById('testOutput');
+                output.innerHTML = '🔄 Testing tools/list (POST /mcp)...\\n';
+                
+                fetch('/mcp', {{
+                    method: 'POST',
+                    headers: {{'Content-Type': 'application/json'}},
+                    body: JSON.stringify({{
+                        jsonrpc: '2.0',
+                        id: '1',
+                        method: 'tools/list'
+                    }})
+                }})
+                .then(response => response.json())
+                .then(data => {{
+                    output.innerHTML += '✅ Tools response:\\n';
+                    output.innerHTML += JSON.stringify(data, null, 2) + '\\n';
+                    output.scrollTop = output.scrollHeight;
+                }})
+                .catch(error => {{
+                    output.innerHTML += `❌ Error: ${{error}}\\n`;
+                }});
+            }}
+            
+            function stopTest() {{
+                if (eventSource) {{
+                    eventSource.close();
+                    eventSource = null;
+                }}
+                document.getElementById('testOutput').innerHTML += '🛑 Tests stopped\\n';
+            }}
+        </script>
     </body>
     </html>
     """)
 
 if __name__ == "__main__":
-    logger.info(f"🚀 Starting Home Assistant MCP Server v0.3.2")
+    logger.info(f"🚀 Starting Home Assistant MCP Server v0.3.3")
     logger.info(f"📊 Database: {DB_CONFIG['user']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
     logger.info(f"🔒 Read-only mode: {READ_ONLY}")
     logger.info(f"⚡ TimescaleDB: {ENABLE_TIMESCALEDB}")
     logger.info(f"🌐 Server starting on port {PORT}")
-    logger.info(f"📡 SSE endpoint: http://localhost:{PORT}/sse")
+    logger.info(f"📡 MCP endpoint: http://localhost:{PORT}/mcp")
     
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")

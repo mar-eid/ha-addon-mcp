@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🎯 Major Update: Home Assistant MCP Integration Compatibility
 
+### Fixed
+- **⚠️ Critical Protocol Fix**: Resolved Home Assistant MCP integration connection errors
+- **🔧 Single Endpoint**: Implemented correct MCP specification with single `/mcp` endpoint
+- **📡 SSE Transport**: Fixed SSE transport implementation per MCP 2024-11-05 specification
+- **🔗 Protocol Compliance**: Corrected JSON-RPC message handling and endpoint detection
+
 ### Added
 - **📡 SSE Transport Protocol**: Full Server-Sent Events implementation required by HA MCP integration
 - **🔧 MCP Protocol Compliance**: Complete Model Context Protocol 2024-11-05 implementation
@@ -17,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **🎯 Enhanced Tool Set**: 5 comprehensive tools for Home Assistant data access
 - **📊 Real-time SSE Stream**: `/sse` endpoint with connection management and keep-alive
 - **🔄 Protocol Initialization**: Proper MCP session setup with capability negotiation
+- **🧪 Live SSE Testing**: Interactive web interface to test SSE endpoint in real-time
+- **📋 Integration Instructions**: Step-by-step setup guide in Web UI
 
 ### Changed
 - **🚀 Complete Server Rewrite**: Full compatibility with official Home Assistant MCP integration
