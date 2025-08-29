@@ -47,13 +47,10 @@ RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Copy application files
 COPY server.py ./
+COPY run.sh ./
 
-# Copy service files
-COPY rootfs /
-
-# Make service files executable
-RUN chmod a+x /etc/services.d/mcp/run
-RUN chmod a+x /etc/services.d/mcp/finish
+# Make run script executable
+RUN chmod a+x ./run.sh
 
 # Expose port (for documentation - Ingress handles actual port mapping)
 EXPOSE 8099
@@ -62,5 +59,5 @@ EXPOSE 8099
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8099/health || exit 1
 
-# The S6 init system will handle running the service
-CMD []
+# The run script will handle startup
+CMD ["./run.sh"]

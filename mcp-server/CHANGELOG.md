@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2025-08-29
+
+### Fixed
+- **🔧 Critical Container Fix**: Resolved "s6-overlay-suexec: fatal: can only run as pid 1" error
+- **Simplified Startup**: Changed from `startup: services` to `startup: application`
+- **Container Init**: Set `init: false` and use direct `run.sh` script instead of s6-overlay
+- **Build Process**: Streamlined Docker container startup process
+
+### Technical Details
+- Replaced complex s6-overlay service management with simple run script
+- Fixed container execution to avoid PID 1 conflicts
+- Maintained all functionality while simplifying container architecture
+
 ## [0.3.0] - 2025-08-29
 
 ### 🎉 Major Milestone: Working Home Assistant Add-on Store Integration
