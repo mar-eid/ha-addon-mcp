@@ -5,7 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.1] - 2025-08-29
+## [0.3.2] - 2025-08-29
+
+### 🎯 Major Update: Home Assistant MCP Integration Compatibility
+
+### Added
+- **📡 SSE Transport Protocol**: Full Server-Sent Events implementation required by HA MCP integration
+- **🔧 MCP Protocol Compliance**: Complete Model Context Protocol 2024-11-05 implementation
+- **📜 MCP Message Handler**: `/message` endpoint for proper MCP client communication
+- **🔍 Tool Discovery**: Dynamic tool listing via `tools/list` method
+- **🎯 Enhanced Tool Set**: 5 comprehensive tools for Home Assistant data access
+- **📊 Real-time SSE Stream**: `/sse` endpoint with connection management and keep-alive
+- **🔄 Protocol Initialization**: Proper MCP session setup with capability negotiation
+
+### Changed
+- **🚀 Complete Server Rewrite**: Full compatibility with official Home Assistant MCP integration
+- **📝 MCP-Standard Responses**: All tool responses now follow MCP content format
+- **🔎 Tool Schema**: Comprehensive JSON schemas for all available tools
+- **💱 Web Interface**: Enhanced root endpoint with integration instructions
+- **🗺️ Tool Organization**: Structured tool registry with proper handlers
+
+### Tools Available for AI Assistants
+- **`ha.get_history`**: Get historical entity data over time periods
+- **`ha.get_statistics`**: Get statistical summaries (mean, min, max, sum)
+- **`ha.list_entities`**: Discover available entities with historical data
+- **`ha.list_statistics`**: List available statistical data sources
+- **`addon.health`**: Monitor server and database connection status
+
+### Integration Instructions
+1. Install **Model Context Protocol** integration in Home Assistant
+2. Configure SSE endpoint: `http://localhost:8099/sse`
+3. Tools automatically available for conversation agents (OpenAI, Anthropic, etc.)
+4. Ask AI assistants questions about your Home Assistant historical data!
+
+### Technical Details
+- Implements MCP Protocol version 2024-11-05
+- SSE transport with proper connection management
+- JSON-RPC 2.0 compliant message handling
+- Backward compatible with previous REST API endpoints
+- Enhanced error handling and logging
+- Real-time connection status monitoring
+
+### Migration Notes
+- **Fully backward compatible** - existing integrations continue to work
+- **New primary integration path**: Use Home Assistant MCP integration
+- **Enhanced AI capabilities**: Ask natural language questions about your data
+- **Tool-based interaction**: AI can now directly query your historical data
 
 ### Fixed
 - **🔧 Critical Container Fix**: Resolved "s6-overlay-suexec: fatal: can only run as pid 1" error
