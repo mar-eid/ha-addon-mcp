@@ -1,87 +1,83 @@
- 🛠️ Home Assistant MCP Server Add-on
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-[![Build & Push](https://github.com/mar-eid/ha-addon-mcp/actions/workflows/build.yml/badge.svg)](https://github.com/mar-eid/ha-addon-mcp/actions/workflows/build.yml)
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
 
-En [Home Assistant](https://www.home-assistant.io/) add-on som kjører en **Model Context Protocol (MCP) server**.
-Serveren kobler seg til den lokale PostgreSQL/TimescaleDB-instansen (Recorder) og eksponerer historiske data og statistikk for **Home Assistant Assist** via MCP-klienten.
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
 
----
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
 
-## ✨ Funksjoner
-- 🚪 **Ingress**: Åpnes direkte i Home Assistant-grensesnittet, ingen porter eller egen innlogging nødvendig.
-- 📊 **Historikk og statistikk**: Hent enkel tidsserie eller batch-statistikk for flere entiteter.
-- 🔒 **Read-only-modus**: Beskytter databasen mot skriving.
-- ⏱️ **TimescaleDB toggle**: Mulighet for å aktivere Timescale-funksjoner når det er støttet.
-- 🔄 **Auto-oppdateringer**: Integrert med Home Assistant Add-on Store – bump `version` i `config.json` og HA henter nyeste image.
+# Logs
+*.log
+logs/
 
----
+# Database
+*.db
+*.sqlite3
 
-## 📦 Installasjon
+# Environment variables
+.env
+.env.local
+.env.*.local
 
-1. Åpne **Add-on Store** i Home Assistant.
-2. Klikk på ⋮-menyen → **Repositories**.
-3. Legg til dette repoet:
-https://github.com/mar-eid/ha-addon-mcp
+# Home Assistant specific
+.storage/
+.cloud/
+.HA_VERSION
+home-assistant_v2.db*
+home-assistant.log*
+deps/
+tts/
 
-4. Installer **MCP Server** fra listen.
-5. Start add-on, åpne **Web UI** (Ingress).
+# Docker
+.dockerignore
 
-## ⚙️ Konfigurasjon
+# Temporary files
+*.tmp
+*.bak
+*.backup
+tmp/
+temp/
 
-`config.json` definerer følgende alternativer:
+# OS files
+Thumbs.db
+Desktop.ini
 
-pg_host: 127.0.0.1        # Database host (som regel localhost)
-pg_port: 5432             # PostgreSQL port
-pg_database: homeassistant
-pg_user: ha_read
-pg_password: ""           # Valgfritt
-read_only: true           # true = kun SELECT
-enable_timescaledb: false # Slå på TimescaleDB-utvidelse
-🧰 Tilgjengelige MCP-tools
-ha.get_history → hent enkel tidsserie (nedprøvet intervall, f.eks. 5m/1h)
-
-ha.get_statistics → aggregert statistikk (hour/day)
-
-ha.get_statistics_bulk → batch-statistikk for flere serier
-
-ha.statistics_meta → oversikt over tilgjengelige serier og felter
-
-addon.health → status for server og DB-tilkobling
-
-🛡️ Sikkerhet
-Read-only DB-bruker anbefales.
-
-read_only: true tvinger alle queries til å være SELECT.
-
-enable_timescaledb: false med mindre du har full kontroll på databasen.
-
-🚀 Utvikling
-Bygg image lokalt
-bash
-Kopier kode
-docker build -t ha-addon-mcp ./mcp-server
-Kjør container lokalt
-bash
-Kopier kode
-docker run --rm -it -p 8099:8099 ha-addon-mcp
-GitHub Actions
-Repoet inkluderer en workflow (.github/workflows/build.yml) som:
-
-bygger for amd64 og arm64
-
-pusher til GitHub Container Registry (ghcr.io/mar-eid/ha-addon-mcp-{arch})
-
-📜 Changelog
-Se CHANGELOG.md.
-
-🤝 Bidra
-Pull requests og issues er velkomne!
-Har du forslag til nye MCP-tools eller forbedringer, lag en issue eller PR.
-
-📄 Lisens
-Dette prosjektet er lisensiert under MIT.
-
-
----
-
-Vil du at jeg også legger til en **fin logo/banner**-seksjon øverst (f.eks. Home Assistant-ikon + MCP-ser
+# Project specific
+config.yaml.local
+secrets.yaml

@@ -6,7 +6,10 @@ RUN apk add --no-cache \
     python3 \
     py3-pip \
     postgresql-client \
-    curl
+    curl \
+    gcc \
+    musl-dev \
+    postgresql-dev
 
 # Create app directory
 WORKDIR /app

@@ -1,1089 +1,639 @@
-#!/usr/bin/env python3
 """
-Home Assistant MCP Server Add-on
-Compatible with Home Assistant's official MCP Client integration
-Enhanced with comprehensive debug logging and stack traces
-Fixed JavaScript errors in web interface
+MCP Server for Home Assistant Historical Data
+Version: 0.4.1
 """
-
 import os
+import sys
 import json
 import asyncio
-import logging
-import traceback
-import sys
 from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Literal
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import logging
+import asyncpg
+from asyncpg.pool import Pool
 
-# Enhanced logging configuration
-log_level = os.getenv("LOG_LEVEL", "info").upper()
-log_format = "%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s"
+# Configure logging
 logging.basicConfig(
-    level=getattr(logging, log_level, logging.INFO),
-    format=log_format,
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.StreamHandler(sys.stderr)
-    ]
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger(__name__)
-
-# Set debug level for key components when in debug mode
-if log_level == "DEBUG":
-    logging.getLogger("uvicorn").setLevel(logging.DEBUG)
-    logging.getLogger("uvicorn.access").setLevel(logging.DEBUG)
-    logging.getLogger("psycopg2").setLevel(logging.DEBUG)
-    logger.debug("🔍 Debug logging enabled - full stack traces will be shown")
-
-app = FastAPI(title="Home Assistant MCP Server", version="0.3.9")
+logger = logging.getLogger("mcp-server")
 
 # Configuration from environment
+DB_HOST = os.getenv("PGHOST", "127.0.0.1")
+DB_PORT = int(os.getenv("PGPORT", "5432"))
+DB_NAME = os.getenv("PGDATABASE", "homeassistant")
+DB_USER = os.getenv("PGUSER", "homeassistant")
+DB_PASSWORD = os.getenv("PGPASSWORD", "")
 READ_ONLY = os.getenv("MCP_READ_ONLY", "true").lower() == "true"
+ENABLE_TIMESCALE = os.getenv("MCP_ENABLE_TIMESCALEDB", "false").lower() == "true"
 PORT = int(os.getenv("MCP_PORT", "8099"))
-ENABLE_TIMESCALEDB = os.getenv("MCP_ENABLE_TIMESCALEDB", "false").lower() == "true"
+QUERY_TIMEOUT = int(os.getenv("MCP_QUERY_TIMEOUT", "30"))
+MAX_QUERY_DAYS = int(os.getenv("MCP_MAX_QUERY_DAYS", "90"))
 
-# Database configuration
-DB_CONFIG = {
-    "host": os.getenv("PGHOST", "127.0.0.1"),
-    "port": int(os.getenv("PGPORT", "5432")),
-    "database": os.getenv("PGDATABASE", "homeassistant"),
-    "user": os.getenv("PGUSER", "homeassistant"),
-    "password": os.getenv("PGPASSWORD", ""),
-}
+app = FastAPI(
+    title="Home Assistant MCP Server",
+    version="0.4.1",
+    description="Model Context Protocol server for Home Assistant historical data"
+)
 
-# MCP Protocol Models
+# Database connection pool
+db_pool: Optional[Pool] = None
+
+# =============================================================================
+# Database Models & Connection
+# =============================================================================
+
+async def init_db_pool():
+    """Initialize database connection pool"""
+    global db_pool
+    try:
+        logger.info(f"Connecting to PostgreSQL: {DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
+        
+        db_pool = await asyncpg.create_pool(
+            host=DB_HOST,
+            port=DB_PORT,
+            database=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            min_size=2,
+            max_size=10,
+            command_timeout=QUERY_TIMEOUT,
+            server_settings={
+                'application_name': 'ha-mcp-server'
+            }
+        )
+        
+        # Test connection and check for TimescaleDB
+        async with db_pool.acquire() as conn:
+            version = await conn.fetchval("SELECT version()")
+            logger.info(f"Connected to: {version}")
+            
+            if ENABLE_TIMESCALE:
+                try:
+                    result = await conn.fetchval(
+                        "SELECT COUNT(*) FROM pg_extension WHERE extname = 'timescaledb'"
+                    )
+                    if result > 0:
+                        logger.info("✅ TimescaleDB extension found")
+                    else:
+                        logger.warning("⚠️ TimescaleDB extension not installed")
+                except Exception as e:
+                    logger.warning(f"Could not check TimescaleDB: {e}")
+                    
+            # Set read-only mode if configured
+            if READ_ONLY:
+                await conn.execute("SET default_transaction_read_only = ON")
+                logger.info("🔒 Read-only mode enabled")
+                
+        return True
+    except Exception as e:
+        logger.error(f"Failed to connect to database: {e}")
+        return False
+
+async def close_db_pool():
+    """Close database connection pool"""
+    global db_pool
+    if db_pool:
+        await db_pool.close()
+        logger.info("Database connection pool closed")
+
+# =============================================================================
+# Pydantic Models for MCP Protocol
+# =============================================================================
+
 class MCPRequest(BaseModel):
+    """Base MCP request model"""
     jsonrpc: str = "2.0"
-    id: Union[str, int]
+    id: Optional[int] = None
     method: str
     params: Optional[Dict[str, Any]] = None
 
 class MCPResponse(BaseModel):
+    """Base MCP response model"""
     jsonrpc: str = "2.0"
-    id: Union[str, int]
+    id: Optional[int] = None
     result: Optional[Dict[str, Any]] = None
     error: Optional[Dict[str, Any]] = None
 
-class MCPToolContent(BaseModel):
-    type: str = "text"
-    text: str
+class HistoryRequest(BaseModel):
+    """Request model for historical data queries"""
+    entity_id: str = Field(..., description="Entity ID to query")
+    start: str = Field(..., description="Start datetime (ISO format)")
+    end: str = Field(..., description="End datetime (ISO format)")
+    interval: Optional[str] = Field("1h", description="Downsample interval (5m, 1h, 1d)")
+    agg: Optional[Literal["raw", "last", "mean", "min", "max", "sum"]] = Field("mean", description="Aggregation method")
+    significant_changes_only: Optional[bool] = Field(True, description="Filter to significant changes")
 
-class MCPToolResult(BaseModel):
-    content: List[MCPToolContent]
-    isError: bool = False
+class StatisticsRequest(BaseModel):
+    """Request model for statistics queries"""
+    statistic_id: str = Field(..., description="Statistic ID to query")
+    start: str = Field(..., description="Start datetime (ISO format)")
+    end: str = Field(..., description="End datetime (ISO format)")
+    period: Literal["5minute", "hour", "day", "month"] = Field("hour", description="Statistics period")
+    fields: Optional[List[Literal["mean", "min", "max", "sum", "state"]]] = Field(["mean"], description="Fields to return")
 
-# Enhanced database connection with comprehensive debug logging
-def get_db_connection():
-    """Get database connection with comprehensive error handling and debug logging"""
-    logger.debug(f"Attempting database connection to {DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
-    logger.debug(f"Database config: {dict(DB_CONFIG, password='***' if DB_CONFIG['password'] else None)}")
+class StatisticsBulkRequest(BaseModel):
+    """Request model for bulk statistics queries"""
+    statistic_ids: List[str] = Field(..., description="List of statistic IDs")
+    start: str = Field(..., description="Start datetime (ISO format)")
+    end: str = Field(..., description="End datetime (ISO format)")
+    period: Literal["5minute", "hour", "day", "month"] = Field("hour", description="Statistics period")
+    fields: Optional[List[Literal["mean", "min", "max", "sum", "state"]]] = Field(["mean", "max", "min"], description="Fields to return")
+    page_size: int = Field(1000, description="Results per page", ge=1, le=5000)
+    page: int = Field(0, description="Page number", ge=0)
+
+# =============================================================================
+# MCP Tool Implementations
+# =============================================================================
+
+async def get_history_data(params: HistoryRequest) -> Dict[str, Any]:
+    """Fetch historical state data from recorder"""
+    if not db_pool:
+        raise HTTPException(status_code=503, detail="Database not connected")
     
     try:
-        start_time = datetime.utcnow()
-        conn = psycopg2.connect(
-            **DB_CONFIG,
-            cursor_factory=RealDictCursor,
-            connect_timeout=10
-        )
-        connection_time = (datetime.utcnow() - start_time).total_seconds()
-        logger.debug(f"Database connection established in {connection_time:.3f}s")
+        # Parse dates
+        start_dt = datetime.fromisoformat(params.start.replace("Z", "+00:00"))
+        end_dt = datetime.fromisoformat(params.end.replace("Z", "+00:00"))
         
-        # Test the connection with a simple query
-        with conn.cursor() as cur:
-            cur.execute("SELECT version(), current_database(), current_user")
-            db_info = cur.fetchone()
-            logger.debug(f"Database info: {db_info}")
+        # Validate date range
+        if (end_dt - start_dt).days > MAX_QUERY_DAYS:
+            raise HTTPException(status_code=400, detail=f"Query range exceeds {MAX_QUERY_DAYS} days")
+        
+        async with db_pool.acquire() as conn:
+            # Get entity metadata
+            entity_meta = await conn.fetchrow("""
+                SELECT metadata_id, entity_id 
+                FROM states_meta 
+                WHERE entity_id = $1
+            """, params.entity_id)
             
-            # Check available tables for debugging
-            if logger.isEnabledFor(logging.DEBUG):
-                cur.execute("""
-                    SELECT table_name 
-                    FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
-                    AND table_name IN ('states', 'states_meta', 'statistics', 'statistics_meta')
-                    ORDER BY table_name
-                """)
-                tables = [row['table_name'] for row in cur.fetchall()]
-                logger.debug(f"Available HA tables: {tables}")
+            if not entity_meta:
+                return {"entity_id": params.entity_id, "series": [], "error": "Entity not found"}
+            
+            # Build query based on aggregation
+            if params.agg == "raw":
+                query = """
+                    SELECT 
+                        last_updated_ts as timestamp,
+                        state,
+                        attributes
+                    FROM states
+                    WHERE metadata_id = $1
+                        AND last_updated_ts >= $2
+                        AND last_updated_ts < $3
+                    ORDER BY last_updated_ts
+                    LIMIT 10000
+                """
+                rows = await conn.fetch(query, entity_meta['metadata_id'], 
+                                       start_dt.timestamp(), end_dt.timestamp())
+            else:
+                # Use time buckets for aggregation
+                interval_map = {
+                    "5m": "5 minutes",
+                    "15m": "15 minutes",
+                    "30m": "30 minutes",
+                    "1h": "1 hour",
+                    "6h": "6 hours",
+                    "1d": "1 day"
+                }
+                pg_interval = interval_map.get(params.interval, "1 hour")
                 
-        return conn
-        
-    except psycopg2.OperationalError as e:
-        logger.warning(f"Database connection failed (OperationalError): {e}")
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"Full connection error traceback:\n{traceback.format_exc()}")
-        return None
-    except psycopg2.Error as e:
-        logger.error(f"PostgreSQL error during connection: {e}")
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"Full PostgreSQL error traceback:\n{traceback.format_exc()}")
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected database error: {e}")
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"Full unexpected error traceback:\n{traceback.format_exc()}")
-        return None
-
-# Mock data generator for fallback when DB is unavailable
-def generate_mock_series(start: str, end: str, points: int = 24):
-    """Generate realistic mock time series data"""
-    try:
-        start_dt = datetime.fromisoformat(start.replace("Z", ""))
-        end_dt = datetime.fromisoformat(end.replace("Z", ""))
-        delta = (end_dt - start_dt) / points
-        
-        data = []
-        base_value = 22.0  # Temperature-like base value
-        for i in range(points):
-            timestamp = start_dt + delta * i
-            # Add some realistic variation
-            variation = 0.5 * (i % 5 - 2) + 0.1 * i
-            value = round(base_value + variation, 2)
+                agg_func = {
+                    "mean": "AVG",
+                    "min": "MIN",
+                    "max": "MAX",
+                    "sum": "SUM",
+                    "last": "LAST"
+                }.get(params.agg, "AVG")
+                
+                if agg_func == "LAST":
+                    query = f"""
+                        SELECT 
+                            date_trunc('hour', to_timestamp(last_updated_ts)) as timestamp,
+                            (array_agg(state ORDER BY last_updated_ts DESC))[1] as state,
+                            COUNT(*) as samples
+                        FROM states
+                        WHERE metadata_id = $1
+                            AND last_updated_ts >= $2
+                            AND last_updated_ts < $3
+                            AND state NOT IN ('unknown', 'unavailable', '')
+                        GROUP BY date_trunc('hour', to_timestamp(last_updated_ts))
+                        ORDER BY timestamp
+                    """
+                else:
+                    query = f"""
+                        SELECT 
+                            date_trunc('hour', to_timestamp(last_updated_ts)) as timestamp,
+                            {agg_func}(CASE 
+                                WHEN state ~ '^[0-9]+\.?[0-9]*$' THEN state::numeric 
+                                ELSE NULL 
+                            END) as value,
+                            COUNT(*) as samples
+                        FROM states
+                        WHERE metadata_id = $1
+                            AND last_updated_ts >= $2
+                            AND last_updated_ts < $3
+                            AND state NOT IN ('unknown', 'unavailable', '')
+                        GROUP BY date_trunc('hour', to_timestamp(last_updated_ts))
+                        ORDER BY timestamp
+                    """
+                
+                rows = await conn.fetch(query, entity_meta['metadata_id'], 
+                                       start_dt.timestamp(), end_dt.timestamp())
             
-            data.append({
-                "time": timestamp.isoformat() + "Z",
-                "value": value
-            })
-        return data
+            # Format results
+            series = []
+            for row in rows:
+                if params.agg == "raw":
+                    series.append({
+                        "t": datetime.fromtimestamp(row['timestamp']).isoformat() + "Z",
+                        "v": row['state'],
+                        "a": json.loads(row['attributes']) if row['attributes'] else None
+                    })
+                else:
+                    value = row.get('value') or row.get('state')
+                    if value is not None:
+                        series.append({
+                            "t": row['timestamp'].isoformat() + "Z",
+                            "v": float(value) if isinstance(value, (int, float)) else value,
+                            "samples": row['samples']
+                        })
+            
+            return {
+                "entity_id": params.entity_id,
+                "series": series,
+                "count": len(series),
+                "interval": params.interval,
+                "aggregation": params.agg
+            }
+            
     except Exception as e:
-        logger.error(f"Error generating mock data: {e}")
-        return []
+        logger.error(f"Error fetching history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-# Enhanced database query functions with debug logging
-def query_history(entity_id: str, start: str, end: str, limit: int = 1000):
-    """Query historical data from Home Assistant recorder database with debug logging"""
-    logger.debug(f"query_history called: entity_id={entity_id}, start={start}, end={end}, limit={limit}")
-    
-    conn = get_db_connection()
-    if not conn:
-        logger.warning("Using mock data - database not available")
-        return generate_mock_series(start, end)
+async def get_statistics_data(params: StatisticsRequest) -> Dict[str, Any]:
+    """Fetch statistics data"""
+    if not db_pool:
+        raise HTTPException(status_code=503, detail="Database not connected")
     
     try:
-        query_start_time = datetime.utcnow()
-        with conn.cursor() as cur:
-            # Enhanced query with better filtering and debug info
-            query = """
-            SELECT s.last_changed as time, s.state as value, s.attributes
-            FROM states s
-            JOIN states_meta sm ON s.metadata_id = sm.metadata_id
-            WHERE sm.entity_id = %s 
-            AND s.last_changed BETWEEN %s::timestamp AND %s::timestamp
-            AND s.state NOT IN ('unknown', 'unavailable', '', 'None')
-            AND s.state IS NOT NULL
-            ORDER BY s.last_changed ASC
-            LIMIT %s
+        start_dt = datetime.fromisoformat(params.start.replace("Z", "+00:00"))
+        end_dt = datetime.fromisoformat(params.end.replace("Z", "+00:00"))
+        
+        if (end_dt - start_dt).days > MAX_QUERY_DAYS:
+            raise HTTPException(status_code=400, detail=f"Query range exceeds {MAX_QUERY_DAYS} days")
+        
+        async with db_pool.acquire() as conn:
+            # Get statistics metadata
+            meta = await conn.fetchrow("""
+                SELECT id, statistic_id, source, unit_of_measurement
+                FROM statistics_meta
+                WHERE statistic_id = $1
+            """, params.statistic_id)
+            
+            if not meta:
+                return {"statistic_id": params.statistic_id, "series": [], "error": "Statistic not found"}
+            
+            # Build field selection
+            fields = ["start_ts as timestamp"]
+            for field in params.fields:
+                fields.append(f"{field}")
+            
+            # Determine table based on period
+            table = "statistics_short_term" if params.period == "5minute" else "statistics"
+            
+            query = f"""
+                SELECT {', '.join(fields)}
+                FROM {table}
+                WHERE metadata_id = $1
+                    AND start_ts >= $2
+                    AND start_ts < $3
+                ORDER BY start_ts
+                LIMIT 5000
             """
             
-            logger.debug(f"Executing query: {query}")
-            logger.debug(f"Query parameters: entity_id={entity_id}, start={start}, end={end}, limit={limit}")
+            rows = await conn.fetch(query, meta['id'], 
+                                   start_dt.timestamp(), end_dt.timestamp())
             
-            cur.execute(query, (entity_id, start, end, limit))
-            query_time = (datetime.utcnow() - query_start_time).total_seconds()
+            # Format results
+            series = []
+            for row in rows:
+                item = {"t": datetime.fromtimestamp(row['timestamp']).isoformat() + "Z"}
+                for field in params.fields:
+                    if field in row and row[field] is not None:
+                        item[field] = float(row[field])
+                series.append(item)
             
-            results = cur.fetchall()
-            logger.debug(f"Query executed in {query_time:.3f}s, returned {len(results)} rows")
+            return {
+                "statistic_id": params.statistic_id,
+                "source": meta['source'],
+                "unit": meta['unit_of_measurement'],
+                "series": series,
+                "count": len(series),
+                "period": params.period
+            }
             
-            if not results:
-                logger.info(f"No data found for entity {entity_id} in range {start} to {end}")
-                if logger.isEnabledFor(logging.DEBUG):
-                    # Check if entity exists at all
-                    cur.execute("SELECT entity_id FROM states_meta WHERE entity_id = %s", (entity_id,))
-                    entity_exists = cur.fetchone()
-                    if entity_exists:
-                        logger.debug(f"Entity {entity_id} exists in states_meta")
-                        # Check for any data for this entity
-                        cur.execute("""
-                            SELECT COUNT(*) as count, MIN(last_changed) as min_time, MAX(last_changed) as max_time
-                            FROM states s 
-                            JOIN states_meta sm ON s.metadata_id = sm.metadata_id 
-                            WHERE sm.entity_id = %s
-                        """, (entity_id,))
-                        entity_stats = cur.fetchone()
-                        logger.debug(f"Entity {entity_id} stats: {entity_stats}")
-                    else:
-                        logger.debug(f"Entity {entity_id} not found in states_meta")
-                        
-                return generate_mock_series(start, end, 12)  # Smaller mock dataset
-            
-            data = []
-            parse_errors = 0
-            for row in results:
-                try:
-                    # Try to convert to float for numeric sensors
-                    try:
-                        value = float(row['value'])
-                    except (ValueError, TypeError):
-                        value = row['value']  # Keep as string for non-numeric
-                    
-                    data.append({
-                        "time": row['time'].isoformat() + "Z" if row['time'] else None,
-                        "value": value,
-                        "attributes": row.get('attributes', {})
-                    })
-                except Exception as e:
-                    parse_errors += 1
-                    logger.debug(f"Error parsing row: {e}, row data: {row}")
+    except Exception as e:
+        logger.error(f"Error fetching statistics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def get_statistics_bulk(params: StatisticsBulkRequest) -> Dict[str, Any]:
+    """Fetch bulk statistics data"""
+    if not db_pool:
+        raise HTTPException(status_code=503, detail="Database not connected")
+    
+    try:
+        start_dt = datetime.fromisoformat(params.start.replace("Z", "+00:00"))
+        end_dt = datetime.fromisoformat(params.end.replace("Z", "+00:00"))
+        
+        if (end_dt - start_dt).days > MAX_QUERY_DAYS:
+            raise HTTPException(status_code=400, detail=f"Query range exceeds {MAX_QUERY_DAYS} days")
+        
+        results = {}
+        async with db_pool.acquire() as conn:
+            for stat_id in params.statistic_ids:
+                # Get metadata
+                meta = await conn.fetchrow("""
+                    SELECT id, statistic_id, source, unit_of_measurement
+                    FROM statistics_meta
+                    WHERE statistic_id = $1
+                """, stat_id)
+                
+                if not meta:
+                    results[stat_id] = {"error": "Not found"}
                     continue
-            
-            logger.info(f"Retrieved {len(data)} data points for {entity_id}")
-            if parse_errors > 0:
-                logger.warning(f"Skipped {parse_errors} invalid data points")
-            
-            if logger.isEnabledFor(logging.DEBUG) and data:
-                logger.debug(f"Sample data point: {data[0]}")
                 
-            return data
-            
-    except psycopg2.Error as e:
-        logger.error(f"PostgreSQL error in query_history: {e}")
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"Full PostgreSQL error traceback:\n{traceback.format_exc()}")
-        return generate_mock_series(start, end)
-    except Exception as e:
-        logger.error(f"Unexpected error in query_history: {e}")
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"Full error traceback:\n{traceback.format_exc()}")
-        return generate_mock_series(start, end)
-    finally:
-        if conn:
-            conn.close()
-            logger.debug("Database connection closed")
-
-# MCP Tool Handlers with enhanced debug logging
-def handle_get_history(params: Dict[str, Any]) -> MCPToolResult:
-    """Handle ha.get_history tool calls - Get historical sensor data with debug logging"""
-    logger.debug(f"handle_get_history called with params: {params}")
-    
-    try:
-        entity_id = params.get("entity_id")
-        start = params.get("start")
-        end = params.get("end")
+                # Build query
+                fields = ["start_ts as timestamp"] + list(params.fields)
+                table = "statistics_short_term" if params.period == "5minute" else "statistics"
+                
+                query = f"""
+                    SELECT {', '.join(fields)}
+                    FROM {table}
+                    WHERE metadata_id = $1
+                        AND start_ts >= $2
+                        AND start_ts < $3
+                    ORDER BY start_ts
+                    LIMIT $4 OFFSET $5
+                """
+                
+                rows = await conn.fetch(
+                    query, meta['id'], 
+                    start_dt.timestamp(), end_dt.timestamp(),
+                    params.page_size, params.page * params.page_size
+                )
+                
+                # Format results
+                series = []
+                for row in rows:
+                    item = {"t": datetime.fromtimestamp(row['timestamp']).isoformat() + "Z"}
+                    for field in params.fields:
+                        if field in row and row[field] is not None:
+                            item[field] = float(row[field])
+                    series.append(item)
+                
+                results[stat_id] = {
+                    "source": meta['source'],
+                    "unit": meta['unit_of_measurement'],
+                    "series": series,
+                    "count": len(series)
+                }
         
-        logger.debug(f"Extracted parameters: entity_id={entity_id}, start={start}, end={end}")
-        
-        if not all([entity_id, start, end]):
-            error_msg = "Missing required parameters: entity_id, start, end"
-            logger.warning(error_msg)
-            return MCPToolResult(
-                content=[MCPToolContent(text=error_msg)],
-                isError=True
-            )
-        
-        logger.info(f"Getting history for {entity_id} from {start} to {end}")
-        
-        query_start_time = datetime.utcnow()
-        data = query_history(entity_id, start, end)
-        query_duration = (datetime.utcnow() - query_start_time).total_seconds()
-        
-        logger.debug(f"query_history completed in {query_duration:.3f}s, got {len(data)} points")
-        
-        result = {
-            "entity_id": entity_id,
-            "start": start,
-            "end": end,
-            "data_points": len(data),
-            "query_duration_seconds": round(query_duration, 3),
-            "history": data,
-            "message": f"Retrieved {len(data)} data points for {entity_id}"
+        return {
+            "items": results,
+            "page": params.page,
+            "page_size": params.page_size,
+            "next_page": params.page + 1 if any(len(r.get("series", [])) == params.page_size for r in results.values()) else None
         }
-        
-        result_json = json.dumps(result, indent=2)
-        logger.debug(f"Returning result with {len(result_json)} characters")
-        
-        return MCPToolResult(
-            content=[MCPToolContent(text=result_json)]
-        )
         
     except Exception as e:
-        logger.error(f"Error in handle_get_history: {e}")
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"Full handle_get_history error traceback:\n{traceback.format_exc()}")
-        return MCPToolResult(
-            content=[MCPToolContent(text=f"Error getting history: {str(e)}")],
-            isError=True
-        )
+        logger.error(f"Error fetching bulk statistics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-def handle_addon_health(params: Dict[str, Any]) -> MCPToolResult:
-    """Handle addon.health tool calls - Get server health status"""
-    try:
-        conn = get_db_connection()
-        db_connected = conn is not None
-        if conn:
-            conn.close()
-        
-        result = {
-            "addon_status": "running",
-            "version": "0.3.9",
-            "database_connected": db_connected,
-            "database_config": {
-                "host": DB_CONFIG["host"],
-                "port": DB_CONFIG["port"], 
-                "database": DB_CONFIG["database"],
-                "user": DB_CONFIG["user"]
-            },
-            "features": {
-                "read_only": READ_ONLY,
-                "timescaledb": ENABLE_TIMESCALEDB
-            },
-            "mcp_tools": ["ha.get_history", "addon.health"],
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "message": f"MCP Server is running with {'database' if db_connected else 'mock data'}"
-        }
-        
-        return MCPToolResult(
-            content=[MCPToolContent(text=json.dumps(result, indent=2))]
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in addon_health: {e}")
-        return MCPToolResult(
-            content=[MCPToolContent(text=f"Error getting health status: {str(e)}")],
-            isError=True
-        )
-
-# SSE Endpoint for MCP Protocol Compliance
-@app.get("/mcp")
-async def mcp_sse_endpoint(request: Request):
-    """
-    SSE endpoint for MCP protocol - required by Home Assistant MCP Client
-    Provides Server-Sent Events transport for Model Context Protocol
-    """
-    client_info = f"{request.client.host}:{request.client.port}" if request.client else "unknown"
-    logger.info(f"SSE connection established with {client_info}")
-    logger.debug(f"SSE request headers: {dict(request.headers)}")
-    
-    async def sse_stream():
-        try:
-            # Send server initialization event
-            init_event = {
-                "jsonrpc": "2.0",
-                "method": "notifications/initialized",
-                "params": {
-                    "protocolVersion": "2024-11-05",
-                    "serverInfo": {
-                        "name": "Home Assistant MCP Server",
-                        "version": "0.3.9"
-                    },
-                    "capabilities": {
-                        "tools": {}
-                    }
-                }
-            }
-            
-            yield f"data: {json.dumps(init_event)}\n\n"
-            logger.debug(f"Sent SSE initialization to {client_info}")
-            
-            # Send tools list notification
-            tools_event = {
-                "jsonrpc": "2.0", 
-                "method": "notifications/tools/list",
-                "params": {
-                    "tools": [
-                        {
-                            "name": tool_info["name"],
-                            "description": tool_info["description"],
-                            "inputSchema": tool_info["inputSchema"]
-                        }
-                        for tool_info in MCP_TOOLS.values()
-                    ]
-                }
-            }
-            
-            yield f"data: {json.dumps(tools_event)}\n\n"
-            logger.debug(f"Sent SSE tools list to {client_info}")
-            
-            # Keep connection alive with periodic pings
-            ping_count = 0
-            while True:
-                await asyncio.sleep(30)  # Ping every 30 seconds
-                ping_count += 1
-                
-                ping_event = {
-                    "jsonrpc": "2.0",
-                    "method": "notifications/ping", 
-                    "params": {
-                        "timestamp": datetime.utcnow().isoformat() + "Z",
-                        "sequence": ping_count,
-                        "server_status": "running"
-                    }
-                }
-                
-                yield f"data: {json.dumps(ping_event)}\n\n"
-                logger.debug(f"Sent SSE ping #{ping_count} to {client_info}")
-                
-        except asyncio.CancelledError:
-            logger.info(f"SSE client {client_info} disconnected gracefully")
-        except Exception as e:
-            logger.error(f"SSE stream error for {client_info}: {e}")
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"SSE stream error traceback:\n{traceback.format_exc()}")
-            # Send error event before closing
-            error_event = {
-                "jsonrpc": "2.0",
-                "method": "notifications/error",
-                "params": {
-                    "error": str(e),
-                    "timestamp": datetime.utcnow().isoformat() + "Z"
-                }
-            }
-            yield f"data: {json.dumps(error_event)}\n\n"
-    
-    return StreamingResponse(
-        sse_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive", 
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Accept, Authorization, Content-Type",
-            "X-Accel-Buffering": "no"  # Disable proxy buffering for real-time streaming
-        }
-    )
-
-# MCP Tool Registry
-MCP_TOOLS = {
-    "ha.get_history": {
-        "name": "ha.get_history",
-        "description": "Get historical state data for a Home Assistant entity over a specified time period.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "entity_id": {
-                    "type": "string",
-                    "description": "The entity ID to get history for (e.g., 'sensor.temperature')"
-                },
-                "start": {
-                    "type": "string",
-                    "description": "Start time in ISO 8601 format (e.g., '2024-01-01T00:00:00Z')"
-                },
-                "end": {
-                    "type": "string", 
-                    "description": "End time in ISO 8601 format (e.g., '2024-01-02T00:00:00Z')"
-                }
-            },
-            "required": ["entity_id", "start", "end"]
-        },
-        "handler": handle_get_history
-    },
-    "addon.health": {
-        "name": "addon.health",
-        "description": "Get health status and configuration of the MCP server.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {}
-        },
-        "handler": handle_addon_health
-    }
-}
-
-# Main MCP Protocol Endpoint with enhanced debug logging
-@app.get("/mcp")
-async def mcp_sse_endpoint(request: Request):
-    """
-    SSE endpoint for MCP protocol - Server-Sent Events transport
-    Used by MCP clients that prefer streaming connections
-    """
-    client_info = f"{request.client.host}:{request.client.port}" if request.client else "unknown"
-    logger.debug(f"SSE MCP endpoint called by client: {client_info}")
-    
-    async def sse_stream():
-        try:
-            # Send endpoint announcement
-            endpoint_event = {
-                "jsonrpc": "2.0",
-                "method": "endpoint",
-                "params": {
-                    "endpoint": {
-                        "method": "POST",
-                        "path": "/mcp"
-                    }
-                }
-            }
-            yield f"data: {json.dumps(endpoint_event)}\n\n"
-            logger.debug(f"Sent SSE endpoint announcement to {client_info}")
-            
-            # Send initialization
-            init_event = {
-                "jsonrpc": "2.0",
-                "method": "notifications/initialized", 
-                "params": {
-                    "protocolVersion": "2024-11-05",
-                    "serverInfo": {
-                        "name": "Home Assistant MCP Server",
-                        "version": "0.3.8"
-                    },
-                    "capabilities": {
-                        "tools": {}
-                    }
-                }
-            }
-            yield f"data: {json.dumps(init_event)}\n\n"
-            logger.debug(f"Sent SSE initialization to {client_info}")
-            
-            # Keep connection alive with pings
-            ping_count = 0
-            while True:
-                await asyncio.sleep(30)  # Ping every 30 seconds
-                ping_count += 1
-                ping_event = {
-                    "jsonrpc": "2.0",
-                    "method": "notifications/ping",
-                    "params": {
-                        "timestamp": datetime.utcnow().isoformat() + "Z",
-                        "sequence": ping_count
-                    }
-                }
-                yield f"data: {json.dumps(ping_event)}\n\n"
-                logger.debug(f"Sent SSE ping #{ping_count} to {client_info}")
-                
-        except asyncio.CancelledError:
-            logger.info(f"SSE client {client_info} disconnected")
-            break
-        except Exception as e:
-            logger.error(f"SSE stream error for {client_info}: {e}")
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"SSE error traceback:\n{traceback.format_exc()}")
-            break
-    
-    return StreamingResponse(
-        sse_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST",
-            "Access-Control-Allow-Headers": "Accept, Authorization, Content-Type"
-        }
-    )
+# =============================================================================
+# MCP Protocol Endpoints
+# =============================================================================
 
 @app.post("/mcp")
-async def mcp_endpoint(request: Request):
-    """
-    Main MCP endpoint compatible with Home Assistant's MCP Client integration
-    Handles JSON-RPC 2.0 messages for the Model Context Protocol
-    Enhanced with comprehensive debug logging
-    """
-    client_info = f"{request.client.host}:{request.client.port}" if request.client else "unknown"
-    logger.debug(f"MCP endpoint called by client: {client_info}")
-    logger.debug(f"Request headers: {dict(request.headers)}")
-    
+async def mcp_handler(request: Request):
+    """Main MCP protocol handler"""
     try:
-        request_data = await request.json()
-        logger.info(f"Received MCP request: {request_data.get('method', 'unknown')} from {client_info}")
-        logger.debug(f"Full request data: {json.dumps(request_data, indent=2)}")
+        body = await request.json()
+        mcp_request = MCPRequest(**body)
         
-        # Handle single request only (simplified)
-        logger.debug("Processing single request")
-        try:
-            mcp_req = MCPRequest(**request_data)
-            response = await handle_mcp_request(mcp_req)
-            response_dict = response.dict()
-            logger.debug(f"Single request completed successfully")
-            return response_dict
-        except Exception as e:
-            logger.error(f"Error creating MCPRequest: {e}")
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"MCPRequest creation error traceback:\n{traceback.format_exc()}")
-            return {
-                "jsonrpc": "2.0",
-                "id": request_data.get("id", "error"),
-                "error": {
-                    "code": -32600,
-                    "message": f"Invalid request: {str(e)}"
-                }
-            }
-            
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error from {client_info}: {e}")
-        return {
-            "jsonrpc": "2.0",
-            "id": None,
-            "error": {
-                "code": -32700,
-                "message": f"Parse error: {str(e)}"
-            }
-        }
-    except Exception as e:
-        logger.error(f"Error processing MCP request from {client_info}: {e}")
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"Full MCP endpoint error traceback:\n{traceback.format_exc()}")
-        return {
-            "jsonrpc": "2.0",
-            "id": 0,
-            "error": {
-                "code": -32603,
-                "message": f"Internal error: {str(e)}"
-            }
-        }
-
-async def handle_mcp_request(request: MCPRequest) -> MCPResponse:
-    """Handle individual MCP protocol requests with debug logging"""
-    logger.debug(f"handle_mcp_request called: method={request.method}, id={request.id}")
-    logger.debug(f"Request params: {request.params}")
-    
-    try:
-        method = request.method
-        params = request.params or {}
-        logger.info(f"Processing MCP method: {method}")
-        
-        if method == "initialize":
-            logger.debug("Handling initialize request")
-            return MCPResponse(
-                id=request.id,
-                result={
-                    "protocolVersion": "2024-11-05",
-                    "serverInfo": {
-                        "name": "Home Assistant MCP Server",
-                        "version": "0.3.7"
+        # Route to appropriate tool
+        if mcp_request.method == "tools/list":
+            result = {
+                "tools": [
+                    {
+                        "name": "ha.get_history",
+                        "description": "Query historical state data from Home Assistant recorder",
+                        "inputSchema": HistoryRequest.schema()
                     },
-                    "capabilities": {
-                        "tools": {}
+                    {
+                        "name": "ha.get_statistics",
+                        "description": "Query aggregated statistics data",
+                        "inputSchema": StatisticsRequest.schema()
+                    },
+                    {
+                        "name": "ha.get_statistics_bulk",
+                        "description": "Query multiple statistics in bulk",
+                        "inputSchema": StatisticsBulkRequest.schema()
+                    },
+                    {
+                        "name": "ha.list_entities",
+                        "description": "List available entities with recent data",
+                        "inputSchema": {}
                     }
-                }
-            )
-        
-        elif method == "tools/list":
-            logger.debug("Handling tools/list request")
-            tools = []
-            for tool_name, tool_info in MCP_TOOLS.items():
-                tools.append({
-                    "name": tool_info["name"],
-                    "description": tool_info["description"],
-                    "inputSchema": tool_info["inputSchema"]
-                })
+                ]
+            }
+        elif mcp_request.method == "tools/call":
+            tool_name = mcp_request.params.get("name")
+            tool_params = mcp_request.params.get("arguments", {})
             
-            logger.debug(f"Returning {len(tools)} tools")
-            return MCPResponse(
-                id=request.id,
-                result={"tools": tools}
-            )
-        
-        elif method == "tools/call":
-            tool_name = params.get("name")
-            tool_args = params.get("arguments", {})
-            
-            logger.debug(f"Handling tools/call request: tool={tool_name}, args={tool_args}")
-            
-            if tool_name not in MCP_TOOLS:
-                error_msg = f"Unknown tool: {tool_name}"
-                logger.warning(error_msg)
-                return MCPResponse(
-                    id=request.id,
-                    error={
-                        "code": -32602,
-                        "message": error_msg
-                    }
-                )
-            
-            # Execute the tool
-            logger.info(f"Executing tool: {tool_name}")
-            tool_handler = MCP_TOOLS[tool_name]["handler"]
-            
-            tool_start_time = datetime.utcnow()
-            result = tool_handler(tool_args)
-            tool_duration = (datetime.utcnow() - tool_start_time).total_seconds()
-            
-            logger.debug(f"Tool {tool_name} executed in {tool_duration:.3f}s")
-            logger.debug(f"Tool result isError: {result.isError}")
-            
-            return MCPResponse(
-                id=request.id,
-                result=result.dict()
-            )
-        
+            if tool_name == "ha.get_history":
+                result = await get_history_data(HistoryRequest(**tool_params))
+            elif tool_name == "ha.get_statistics":
+                result = await get_statistics_data(StatisticsRequest(**tool_params))
+            elif tool_name == "ha.get_statistics_bulk":
+                result = await get_statistics_bulk(StatisticsBulkRequest(**tool_params))
+            elif tool_name == "ha.list_entities":
+                result = await list_entities()
+            else:
+                raise ValueError(f"Unknown tool: {tool_name}")
         else:
-            error_msg = f"Method not found: {method}"
-            logger.warning(error_msg)
-            return MCPResponse(
-                id=request.id,
-                error={
-                    "code": -32601,
-                    "message": error_msg
-                }
-            )
-            
-    except Exception as e:
-        logger.error(f"Error handling MCP request {request.method}: {e}")
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"Full MCP request error traceback:\n{traceback.format_exc()}")
+            raise ValueError(f"Unknown method: {mcp_request.method}")
+        
         return MCPResponse(
-            id=request.id,
+            jsonrpc="2.0",
+            id=mcp_request.id,
+            result=result
+        ).dict()
+        
+    except Exception as e:
+        logger.error(f"MCP handler error: {e}")
+        return MCPResponse(
+            jsonrpc="2.0",
+            id=body.get("id") if "body" in locals() else None,
             error={
                 "code": -32603,
-                "message": f"Internal error: {str(e)}"
+                "message": str(e)
             }
-        )
+        ).dict()
 
-# Health check endpoint
+# =============================================================================
+# REST API Endpoints (for compatibility and testing)
+# =============================================================================
+
 @app.get("/health")
-def health():
-    """Health check endpoint for monitoring and diagnostics"""
-    conn = get_db_connection()
-    db_status = "connected" if conn else "disconnected"
-    if conn:
-        conn.close()
+async def health():
+    """Health check endpoint"""
+    db_status = "connected" if db_pool else "disconnected"
+    
+    if db_pool:
+        try:
+            async with db_pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+                db_status = "healthy"
+        except:
+            db_status = "unhealthy"
     
     return {
-        "status": "healthy",
-        "version": "0.3.8",
+        "status": "ok",
+        "version": "0.4.1",
         "database": db_status,
         "read_only": READ_ONLY,
-        "timescaledb": ENABLE_TIMESCALEDB,
-        "mcp_endpoint": "/mcp",
-        "protocol_version": "2024-11-05",
-        "available_tools": list(MCP_TOOLS.keys()),
+        "timescaledb": ENABLE_TIMESCALE,
         "timestamp": datetime.utcnow().isoformat() + "Z"
     }
 
-# Root endpoint with FIXED web interface
-@app.get("/")
-def root():
-    """Root endpoint with fixed web interface - no JavaScript errors"""
-    conn = get_db_connection()
-    db_status = "connected" if conn else "disconnected"
-    if conn:
-        conn.close()
-    
-    # Create safe HTML template without problematic JavaScript
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Home Assistant MCP Server v0.3.8</title>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-            body {{ 
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
-                margin: 0; 
-                background: #f5f5f5; 
-                line-height: 1.6;
-            }}
-            .header {{ 
-                background: linear-gradient(135deg, #1976d2, #42a5f5); 
-                color: white; 
-                padding: 20px 40px; 
-                text-align: center;
-            }}
-            .container {{ 
-                max-width: 1200px; 
-                margin: 0 auto; 
-                padding: 30px; 
-            }}
-            .status {{ 
-                padding: 15px; 
-                border-radius: 8px; 
-                margin: 20px 0; 
-                font-weight: 500; 
-            }}
-            .healthy {{ 
-                background-color: #e8f5e8; 
-                color: #2e7d32; 
-                border-left: 4px solid #4caf50; 
-            }}
-            .warning {{ 
-                background-color: #fff8e1; 
-                color: #f57c00; 
-                border-left: 4px solid #ff9800; 
-            }}
-            .card {{ 
-                background: white; 
-                padding: 25px; 
-                border-radius: 12px; 
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1); 
-                margin: 20px 0; 
-            }}
-            .endpoint {{ 
-                background: #f8f9fa; 
-                padding: 15px; 
-                margin: 10px 0; 
-                border-left: 4px solid #1976d2; 
-                border-radius: 4px; 
-                font-family: monospace;
-            }}
-            .url {{ 
-                background: #e3f2fd; 
-                padding: 10px; 
-                border-radius: 4px; 
-                font-family: monospace; 
-                color: #1565c0; 
-                word-break: break-all;
-            }}
-            .test-output {{ 
-                background: #1e1e1e; 
-                color: #00ff41; 
-                padding: 20px; 
-                border-radius: 8px; 
-                font-family: monospace; 
-                height: 200px; 
-                overflow-y: auto; 
-                font-size: 13px; 
-                white-space: pre-wrap;
-            }}
-            button {{ 
-                background: #1976d2; 
-                color: white; 
-                padding: 12px 24px; 
-                border: none; 
-                border-radius: 6px; 
-                cursor: pointer; 
-                margin: 5px; 
-                font-size: 14px; 
-            }}
-            button:hover {{ 
-                background: #1565c0; 
-            }}
-            .grid {{ 
-                display: grid; 
-                grid-template-columns: 1fr 1fr; 
-                gap: 20px; 
-            }}
-            @media (max-width: 768px) {{ 
-                .grid {{ 
-                    grid-template-columns: 1fr; 
-                }} 
-            }}
-            h1, h2, h3 {{ 
-                color: #1976d2; 
-            }}
-            .tool {{ 
-                background: #f5f5f5; 
-                padding: 12px; 
-                margin: 8px 0; 
-                border-radius: 6px; 
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="header">
-            <h1>🤖 Home Assistant MCP Server v0.3.8</h1>
-            <p>Model Context Protocol server for querying Home Assistant historical data</p>
-        </div>
-        
-        <div class="container">
-            <div class="status {'healthy' if db_status == 'connected' else 'warning'}">
-                <strong>Status:</strong> Running | 
-                <strong>Database:</strong> {db_status.title()} | 
-                <strong>Read-only:</strong> {READ_ONLY} | 
-                <strong>TimescaleDB:</strong> {ENABLE_TIMESCALEDB}
-            </div>
-            
-            <div class="grid">
-                <div class="card">
-                    <h2>🔧 Setup Instructions</h2>
-                    <h3>1. Install Home Assistant MCP Integration</h3>
-                    <p>Go to: <strong>Settings → Devices & Services → Add Integration</strong></p>
-                    <p>Search for: <strong>"Model Context Protocol"</strong></p>
-                    
-                    <h3>2. Configure MCP Server</h3>
-                    <p><strong>Server URL:</strong></p>
-                    <div class="url">http://localhost:8099/mcp</div>
-                    <p><em>For add-on: Use the add-on's internal URL or ingress</em></p>
-                    
-                    <h3>3. Available Tools</h3>
-                    <div class="tool"><strong>ha.get_history</strong> - Get entity state history</div>
-                    <div class="tool"><strong>addon.health</strong> - Server health status</div>
-                </div>
-                
-                <div class="card">
-                    <h2>🧪 Test Interface</h2>
-                    <button onclick="testHealth()">Test Health</button>
-                    <button onclick="testTools()">Test Tools List</button>
-                    <button onclick="testHistory()">Test Get History</button>
-                    <button onclick="testSSE()">Test SSE Stream</button>
-                    <button onclick="stopSSE()">Stop SSE</button>
-                    <button onclick="clearOutput()">Clear Output</button>
-                    
-                    <div class="test-output" id="testOutput">Welcome to Home Assistant MCP Server v0.3.8!
+@app.post("/tools/ha.get_history")
+async def rest_get_history(req: HistoryRequest):
+    """REST endpoint for history queries"""
+    return await get_history_data(req)
 
-Ready to serve historical data to AI assistants via MCP protocol.
-Click test buttons above to verify functionality.
+@app.post("/tools/ha.get_statistics")
+async def rest_get_statistics(req: StatisticsRequest):
+    """REST endpoint for statistics queries"""
+    return await get_statistics_data(req)
 
-Database Status: {db_status}
-Available Tools: {len(MCP_TOOLS)}
-</div>
-                </div>
-            </div>
-            
-            <div class="card">
-                <h2>📡 API Endpoints</h2>
-                <div class="endpoint"><strong>POST /mcp</strong> - Main MCP protocol endpoint (JSON-RPC 2.0)</div>
-                <div class="endpoint"><strong>GET /health</strong> - <a href="/health" target="_blank">Health check and status</a></div>
-                <div class="endpoint"><strong>GET /</strong> - This testing interface</div>
-            </div>
-            
-            <div class="card">
-                <h2>💡 Usage with Home Assistant Assist</h2>
-                <p>Once configured, you can ask Home Assistant Assist questions like:</p>
-                <ul>
-                    <li>"What was the temperature in the living room yesterday?"</li>
-                    <li>"Show me energy consumption for the past week"</li>
-                    <li>"Get history for sensor.temperature from last month"</li>
-                </ul>
-            </div>
-        </div>
-        
-        <script>
-            // Fixed JavaScript functions without errors
-            function addLogEntry(text) {{
-                const output = document.getElementById('testOutput');
-                const now = new Date();
-                const timeStr = now.toLocaleTimeString();
-                output.textContent += '[' + timeStr + '] ' + text + '\\n';
-                output.scrollTop = output.scrollHeight;
-            }}
-            
-            function clearOutput() {{
-                document.getElementById('testOutput').textContent = 'Output cleared.\\n';
-            }}
-            
-            function testHealth() {{
-                addLogEntry('🔄 Testing health endpoint...');
-                fetch('/health')
-                .then(function(response) {{ return response.json(); }})
-                .then(function(data) {{
-                    addLogEntry('✅ Health check successful:');
-                    addLogEntry(JSON.stringify(data, null, 2));
-                }})
-                .catch(function(error) {{
-                    addLogEntry('❌ Health check failed: ' + error);
-                }});
-            }}
-            
-            function testTools() {{
-                addLogEntry('🔄 Testing MCP tools/list...');
-                fetch('/mcp', {{
-                    method: 'POST',
-                    headers: {{'Content-Type': 'application/json'}},
-                    body: JSON.stringify({{
-                        jsonrpc: '2.0',
-                        id: '1',
-                        method: 'tools/list'
-                    }})
-                }})
-                .then(function(response) {{ return response.json(); }})
-                .then(function(data) {{
-                    addLogEntry('✅ MCP tools/list successful:');
-                    addLogEntry(JSON.stringify(data, null, 2));
-                }})
-                .catch(function(error) {{
-                    addLogEntry('❌ MCP tools/list failed: ' + error);
-                }});
-            }}
-            
-            function testHistory() {{
-                const now = new Date();
-                const endTime = now.toISOString();
-                const startTime = new Date(now.getTime() - 24*60*60*1000).toISOString();
-                
-                addLogEntry('🔄 Testing ha.get_history tool...');
-                fetch('/mcp', {{
-                    method: 'POST',
-                    headers: {{'Content-Type': 'application/json'}},
-                    body: JSON.stringify({{
-                        jsonrpc: '2.0',
-                        id: '2',
-                        method: 'tools/call',
-                        params: {{
-                            name: 'ha.get_history',
-                            arguments: {{
-                                entity_id: 'sensor.temperature',
-                                start: startTime,
-                                end: endTime
-                            }}
-                        }}
-                    }})
-                }})
-                .then(function(response) {{ return response.json(); }})
-                .then(function(data) {{
-                    addLogEntry('✅ Get history test completed:');
-                    addLogEntry(JSON.stringify(data, null, 2));
-                }})
-                .catch(function(error) {{
-                    addLogEntry('❌ Get history test failed: ' + error);
-                }});
-            }}
-        </script>
-    </body>
-    </html>
-    """
-    
-    return HTMLResponse(content=html_content)
+@app.post("/tools/ha.get_statistics_bulk")
+async def rest_get_statistics_bulk(req: StatisticsBulkRequest):
+    """REST endpoint for bulk statistics queries"""
+    return await get_statistics_bulk(req)
 
-def main():
-    """Enhanced main function with comprehensive debug logging"""
-    logger.info("🚀 Starting Home Assistant MCP Server v0.3.8...")
-    logger.info(f"📊 Database: {DB_CONFIG['user']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
-    logger.info(f"🔒 Read-only mode: {READ_ONLY}")
-    logger.info(f"⚡ TimescaleDB: {ENABLE_TIMESCALEDB}")
-    logger.info(f"🔍 Log level: {log_level}")
-    
-    # Enhanced startup logging for debug mode
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug("🔧 Debug mode enabled - comprehensive logging active")
-        logger.debug(f"Python version: {sys.version}")
-        logger.debug("Environment variables (MCP_* and PG*):")
-        for key, value in sorted(os.environ.items()):
-            if key.startswith('MCP_') or key.startswith('PG'):
-                display_value = '***' if 'PASSWORD' in key.upper() else value
-                logger.debug(f"  {key}={display_value}")
-        logger.debug(f"Available MCP tools: {list(MCP_TOOLS.keys())}")
-    
-    logger.info(f"🔍 Testing database connection...")
+@app.get("/tools/ha.list_entities")
+async def list_entities(limit: int = 100):
+    """List available entities with recent data"""
+    if not db_pool:
+        raise HTTPException(status_code=503, detail="Database not connected")
     
     try:
-        conn_start = datetime.utcnow()
-        conn = get_db_connection()
-        conn_time = (datetime.utcnow() - conn_start).total_seconds()
-        
-        if conn:
-            logger.info("✅ Database connection successful")
-            logger.debug(f"Database connection test completed in {conn_time:.3f}s")
-            conn.close()
-        else:
-            logger.warning("⚠️  Database connection failed - using mock data")
+        async with db_pool.acquire() as conn:
+            # Get entities with recent data
+            query = """
+                SELECT DISTINCT
+                    sm.entity_id,
+                    sm.metadata_id,
+                    COUNT(s.state_id) as state_count,
+                    MAX(s.last_updated_ts) as last_seen_ts
+                FROM states_meta sm
+                LEFT JOIN states s ON s.metadata_id = sm.metadata_id
+                    AND s.last_updated_ts > $1
+                GROUP BY sm.entity_id, sm.metadata_id
+                HAVING MAX(s.last_updated_ts) IS NOT NULL
+                ORDER BY MAX(s.last_updated_ts) DESC
+                LIMIT $2
+            """
+            
+            # Look for entities with data in the last 7 days
+            since = (datetime.utcnow() - timedelta(days=7)).timestamp()
+            rows = await conn.fetch(query, since, limit)
+            
+            entities = []
+            for row in rows:
+                entities.append({
+                    "entity_id": row['entity_id'],
+                    "state_count": row['state_count'],
+                    "last_seen": datetime.fromtimestamp(row['last_seen_ts']).isoformat() + "Z"
+                })
+            
+            # Also get available statistics
+            stats_query = """
+                SELECT 
+                    statistic_id,
+                    source,
+                    unit_of_measurement,
+                    has_mean,
+                    has_sum
+                FROM statistics_meta
+                ORDER BY statistic_id
+                LIMIT $1
+            """
+            
+            stats_rows = await conn.fetch(stats_query, limit)
+            
+            statistics = []
+            for row in stats_rows:
+                statistics.append({
+                    "statistic_id": row['statistic_id'],
+                    "source": row['source'],
+                    "unit": row['unit_of_measurement'],
+                    "has_mean": row['has_mean'],
+                    "has_sum": row['has_sum']
+                })
+            
+            return {
+                "entities": entities,
+                "statistics": statistics,
+                "entity_count": len(entities),
+                "statistic_count": len(statistics)
+            }
             
     except Exception as e:
-        logger.error(f"Database test failed: {e}")
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"Database test error traceback:\n{traceback.format_exc()}")
-    
-    logger.info("✅ Database connectivity verified")
-    logger.info(f"🌐 Starting HTTP server on port {PORT}...")
-    logger.info("🎯 Web UI available via Home Assistant Ingress")
-    
-    # Enhanced uvicorn configuration for debug mode
-    uvicorn_log_level = log_level.lower() if log_level in ['DEBUG', 'INFO', 'WARNING', 'ERROR'] else "info"
-    
-    uvicorn_config = {
-        "app": app,
-        "host": "0.0.0.0",
-        "port": PORT,
-        "log_level": uvicorn_log_level,
-        "access_log": logger.isEnabledFor(logging.DEBUG)
-    }
-    
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(f"Uvicorn config: {uvicorn_config}")
-    
-    logger.info("🚀 MCP Server startup complete - ready to serve!")
-    
-    try:
-        uvicorn.run(**uvicorn_config)
-    except Exception as e:
-        logger.error(f"Server failed to start: {e}")
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"Server startup error traceback:\n{traceback.format_exc()}")
-        sys.exit(1)
+        logger.error(f"Error listing entities: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =============================================================================
+# Application Lifecycle
+# =============================================================================
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database on startup"""
+    logger.info("Starting MCP Server v0.4.1")
+    success = await init_db_pool()
+    if not success:
+        logger.warning("⚠️ Running in mock mode - database not connected")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown"""
+    logger.info("Shutting down MCP Server")
+    await close_db_pool()
+
+# =============================================================================
+# Main Entry Point
+# =============================================================================
 
 if __name__ == "__main__":
-    main()
+    try:
+        logger.info(f"Starting server on port {PORT}")
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=PORT,
+            log_level="info",
+            access_log=True
+        )
+    except KeyboardInterrupt:
+        logger.info("Server stopped by user")
+    except Exception as e:
+        logger.error(f"Server error: {e}")
+        sys.exit(1)

@@ -4,7 +4,7 @@
 # Direct run script (no s6-overlay complexity)
 # ==============================================================================
 
-echo "🚀 Starting MCP Server v0.3.8 (Direct Launch)..."
+echo "🚀 Starting MCP Server v0.4.1 (Direct Launch)..."
 
 # Read configuration from Home Assistant
 PG_HOST=$(bashio::config 'pg_host')
@@ -15,6 +15,8 @@ PG_PASSWORD=$(bashio::config 'pg_password')
 READ_ONLY=$(bashio::config 'read_only')
 ENABLE_TIMESCALEDB=$(bashio::config 'enable_timescaledb')
 LOG_LEVEL=$(bashio::config 'log_level')
+QUERY_TIMEOUT=$(bashio::config 'query_timeout')
+MAX_QUERY_DAYS=$(bashio::config 'max_query_days')
 
 echo "📊 Database: ${PG_USER}@${PG_HOST}:${PG_PORT}/${PG_DATABASE}"
 echo "🔒 Read-only mode: ${READ_ONLY}"
@@ -31,6 +33,8 @@ export MCP_READ_ONLY="${READ_ONLY}"
 export MCP_ENABLE_TIMESCALEDB="${ENABLE_TIMESCALEDB}"
 export MCP_PORT="8099"
 export LOG_LEVEL="${LOG_LEVEL^^}"
+export MCP_QUERY_TIMEOUT="${QUERY_TIMEOUT}"
+export MCP_MAX_QUERY_DAYS="${MAX_QUERY_DAYS}"
 
 # Quick database connectivity test
 echo "🔍 Testing database connection..."

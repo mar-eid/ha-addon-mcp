@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2024-12-19
+
+### Added
+- **Real PostgreSQL/TimescaleDB Integration**: Complete implementation using asyncpg for async database operations
+- **Full MCP Protocol Support**: Comprehensive Model Context Protocol implementation for AI assistant integration
+- **Advanced Database Pooling**: Async connection pooling for improved performance and reliability
+- **Entity Discovery**: Enhanced endpoint to list available entities and statistics with metadata
+- **Time-series Aggregations**: Support for multiple aggregation intervals (5m, 15m, 30m, 1h, 6h, 1d)
+- **Bulk Operations**: Efficient bulk querying with pagination support
+
+### Changed
+- **Complete Server Rewrite**: Migrated from mock data to real PostgreSQL queries
+- **Async Architecture**: Full async/await implementation for better concurrency
+- **Enhanced Error Handling**: Comprehensive error handling with detailed logging
+- **Query Optimization**: Improved SQL queries with proper indexing and time-based partitioning support
+- **Response Format**: Standardized MCP-compliant response format across all endpoints
+
+### Fixed
+- **Database Connectivity**: Robust connection management with proper error recovery
+- **Read-only Enforcement**: Correctly applies read-only transaction mode when configured
+- **TimescaleDB Support**: Proper detection and utilization of TimescaleDB features
+- **Memory Management**: Fixed potential memory leaks in connection pooling
+
+### Technical Improvements
+- Implemented asyncpg for high-performance async PostgreSQL operations
+- Added comprehensive input validation using Pydantic models
+- Support for both short-term and long-term statistics tables
+- Query timeout enforcement to prevent long-running queries
+- Maximum query day limits to prevent excessive data retrieval
+- Proper handling of numeric and non-numeric state values
+- Support for JSON attributes in state data
+
+### MCP Tools Available
+- `ha.get_history`: Query historical state data with flexible aggregations
+- `ha.get_statistics`: Retrieve statistical summaries from recorder
+- `ha.get_statistics_bulk`: Bulk query multiple statistics efficiently
+- `ha.list_entities`: Discover entities with recent data and metadata
+
+### Performance
+- Async database operations for non-blocking I/O
+- Connection pooling with configurable min/max connections
+- Efficient SQL queries optimized for Home Assistant's schema
+- Support for TimescaleDB continuous aggregates when available
+
 ## [0.3.9] - 2025-08-29
 
 ### Added
