@@ -1,0 +1,127 @@
+name: Test MCP Server
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'mcp-server/**'
+      - 'tests/**'
+      - '.github/workflows/test.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'mcp-server/**'
+      - 'tests/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11']
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip packages
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt', '**/test-requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r test-requirements.txt
+        pip install -e ./mcp-server || true  # Install server package if setup.py exists
+    
+    - name: Run linting
+      run: |
+        # Format check with black
+        black --check mcp-server/ tests/
+        
+        # Linting with flake8
+        flake8 mcp-server/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 mcp-server/ tests/ --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
+    
+    - name: Run unit tests
+      run: |
+        pytest tests/ -v -m "not integration" --cov=mcp-server --cov-report=xml --cov-report=term
+    
+    - name: Run integration tests
+      run: |
+        pytest tests/ -v -m "integration" --timeout=60
+    
+    - name: Upload coverage to Codecov
+      if: matrix.python-version == '3.10'
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+  test-docker:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Build Docker image
+      run: |
+        docker build -t mcp-server-test ./mcp-server \
+          --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.19
+    
+    - name: Test Docker image
+      run: |
+        # Run container and check it starts
+        docker run -d --name test-server \
+          -e PGHOST=localhost \
+          -e PGPORT=5432 \
+          -e PGDATABASE=test \
+          -e PGUSER=test \
+          -e PGPASSWORD=test \
+          mcp-server-test
+        
+        # Give it time to start
+        sleep 5
+        
+        # Check if container is still running
+        docker ps | grep test-server
+        
+        # Check logs for errors
+        docker logs test-server
+        
+        # Cleanup
+        docker stop test-server
+        docker rm test-server
+
+  security-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: 'mcp-server/'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'

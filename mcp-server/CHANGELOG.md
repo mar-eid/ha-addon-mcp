@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2024-12-19
+
+### 🎉 Major Rewrite: Official MCP SDK Implementation
+
+### Changed
+- **Complete Rewrite**: Now using the official MCP Python SDK (`mcp` package) instead of custom implementation
+- **FastMCP Framework**: Leveraging the high-level FastMCP API for cleaner code
+- **Proper Protocol Compliance**: Using official SDK ensures full MCP protocol compatibility
+- **Simplified Architecture**: Removed custom SSE/REST endpoints in favor of MCP stdio transport
+
+### Added
+- **Official MCP Tools**: Properly registered tools using `@mcp.tool()` decorator
+- **Standard MCP Transport**: Using stdio transport as recommended by MCP specification
+- **Better Type Safety**: Full type hints with official SDK types
+
+### Fixed
+- **Protocol Compatibility**: Should resolve all "Failed to connect" issues with HA MCP Client
+- **Tool Discovery**: Proper tool registration and discovery through official SDK
+- **Message Format**: Correct MCP message format handled by SDK
+
+### Technical Details
+- Uses `mcp` package version 1.1.2 from PyPI
+- FastMCP server with stdio transport
+- Tools: `get_history`, `get_statistics`, `list_entities`, `health_check`
+- Maintains backward compatibility with mock data mode
+- Async/await throughout with proper connection pooling
+
+### Breaking Changes
+- Removed custom REST API endpoints (use MCP protocol instead)
+- Removed SSE endpoint (MCP handles its own transport)
+- Server now runs as stdio process (standard for MCP servers)
+
 ## [0.4.2] - 2024-12-19
 
 ### Added

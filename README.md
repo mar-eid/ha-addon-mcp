@@ -1,17 +1,19 @@
 # 🛠️ Home Assistant MCP Server Add-on
 
 [![Build & Push](https://github.com/mar-eid/ha-addon-mcp/actions/workflows/build.yml/badge.svg)](https://github.com/mar-eid/ha-addon-mcp/actions/workflows/build.yml)
-[![Version](https://img.shields.io/badge/version-0.4.2-blue)](https://github.com/mar-eid/ha-addon-mcp/releases)
+[![Version](https://img.shields.io/badge/version-0.5.0-blue)](https://github.com/mar-eid/ha-addon-mcp/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 A [Home Assistant](https://www.home-assistant.io/) add-on that runs a **Model Context Protocol (MCP) server** for querying historical data from PostgreSQL/TimescaleDB. This enables AI assistants (like OpenAI through Home Assistant Assist) to access and analyze your home automation data.
+
+⚠️ **Version 0.5.0 Update**: Now using the official MCP Python SDK for guaranteed protocol compatibility!
 
 ---
 
 ## ✨ Features
 
-- 🚀 **Real PostgreSQL Integration**: Direct queries to Home Assistant's recorder database
-- 🤖 **MCP Protocol Support**: Full compatibility with Home Assistant's MCP Client integration
+- 🎯 **Official MCP SDK**: Built with the official `mcp` Python package for guaranteed compatibility
+- 🤖 **MCP Protocol Support**: Full compliance with MCP specification through official SDK
 - 📊 **Historical Data Access**: Query entity states and statistics over time
 - 🔒 **Security First**: Read-only database access with configurable restrictions
 - ⚡ **High Performance**: Async database operations with connection pooling
@@ -100,14 +102,16 @@ Discover available entities and statistics:
 ### Using with MCP Client Integration
 
 1. Install the **Model Context Protocol** integration in Home Assistant
-2. Configure the MCP Client with:
-   - **URL**: `http://localhost:8099/mcp`
-   - **Transport**: SSE (Server-Sent Events)
-3. Tools are automatically available to AI assistants
+2. Configure the MCP Client to connect to the add-on:
+   - The add-on provides an MCP server via stdio transport
+   - Tools are automatically discovered by the MCP Client
+3. Available tools will appear in your AI assistant configuration
 
-### Using with REST API
+### Direct Testing (v0.4.x and earlier)
 
-The server also provides REST endpoints for direct testing:
+**Note**: REST endpoints were removed in v0.5.0. The server now uses the official MCP SDK with stdio transport.
+
+For v0.4.x and earlier:
 
 ```bash
 # Check health
@@ -179,24 +183,31 @@ The repository includes automated builds via GitHub Actions:
 
 ## 🐛 Troubleshooting
 
-### Testing SSE Functionality
+### ⚠️ Version 0.5.0 Breaking Changes
 
-If you're experiencing "Failed to connect" errors with the MCP Client integration, test SSE locally:
+Version 0.5.0 uses the official MCP SDK and changes how the server runs:
+- The server now uses stdio transport (standard for MCP)
+- Custom REST/SSE endpoints have been removed
+- Server runs as a subprocess managed by the MCP Client
+- Configuration remains the same
+
+### Testing the MCP Server
+
+With v0.5.0 using the official MCP SDK, testing is different:
 
 ```bash
-# Install dependencies
-pip install -r mcp-server/requirements.txt
+# Install the official MCP package
+pip install mcp==1.1.2
 
-# Run server locally (uses mock data if no DB)
-python run_local.py
+# Run the server directly (stdio mode)
+cd mcp-server
+python server.py
 
-# In another terminal, test SSE
-python test_sse.py
+# The server will wait for MCP protocol messages on stdin
+# You can test with an MCP client or the official MCP CLI tools
 ```
 
-Or use the interactive web interface at `http://localhost:8099/` to test SSE connections visually.
-
-See [TESTING_SSE.md](TESTING_SSE.md) for comprehensive testing instructions.
+The server will use mock data if no database is available, making it easy to test.
 
 ### Database Connection Issues
 
@@ -225,12 +236,12 @@ If the MCP Client can't connect:
 
 See [CHANGELOG.md](mcp-server/CHANGELOG.md) for detailed version history.
 
-### Latest: v0.4.2 (2024-12-19)
-- **SSE Support**: Full Server-Sent Events implementation for MCP protocol
-- **Test Interface**: Interactive web UI for testing SSE connections
-- **Local Testing**: Standalone scripts for debugging without Home Assistant
-- **Mock Mode**: Server works without database for testing
-- **Keep-Alive**: Automatic ping events to maintain connections
+### Latest: v0.5.0 (2024-12-19)
+- **Official MCP SDK**: Complete rewrite using the official `mcp` Python package
+- **Protocol Compliance**: Full MCP specification compliance through official SDK
+- **FastMCP Framework**: Clean, decorator-based tool registration
+- **Stdio Transport**: Standard MCP transport mechanism
+- **Simplified Architecture**: Removed custom implementations in favor of SDK
 
 ---
 
