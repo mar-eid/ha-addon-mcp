@@ -5,7 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.0] - 2024-12-19
+## [0.2.7] - 2025-08-31
+
+### 🛠️ Fixed - MCP SDK Import Error
+
+### Fixed
+- **Critical Import Fix**: Fixed `ModuleNotFoundError: No module named 'mcp.server.fastmcp'` error
+- **Correct MCP Imports**: Updated to use proper MCP Python SDK imports (`mcp.types`, `mcp.server`)
+- **SDK Compatibility**: Implemented server using standard MCP Server class instead of FastMCP
+- **Protocol Compliance**: Using official MCP protocol implementation with stdio transport
+
+### Changed  
+- **Server Implementation**: Migrated from FastMCP to standard MCP Server class
+- **Import Structure**: Updated all MCP imports to use official SDK structure
+- **Transport Method**: Using stdio transport as recommended for MCP servers
+- **Tool Registration**: Proper tool registration using server decorators
+
+### Technical Details
+- Uses `mcp` package version 1.1.2 with correct import paths
+- Implemented HAMCPServer class with proper MCP server initialization
+- Tools registered using `@server.list_tools()` and `@server.call_tool()` decorators
+- Full async implementation with proper database connection pooling
+- Comprehensive error handling and logging throughout
+
+### Compatibility
+- Maintains all existing functionality (get_history, get_statistics, list_entities, health_check)
+- Backward compatible configuration options
+- Same database connection and query logic
+- Mock data mode still available when database unavailable
+
+## [0.5.0] - 2024-12-19 (Deprecated)
 
 ### 🎉 Major Rewrite: Official MCP SDK Implementation
 

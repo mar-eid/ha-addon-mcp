@@ -1,5 +1,5 @@
 name: MCP Server
-version: "0.5.0"
+version: "0.2.7"
 slug: mcp_server
 description: Model Context Protocol server for querying Home Assistant historical data
 url: https://github.com/mar-eid/ha-addon-mcp
@@ -19,14 +19,17 @@ panel_icon: mdi:database-search
 panel_title: MCP Server
 homeassistant: 2024.1.0
 
-# Force local build instead of registry
-# image: ghcr.io/mar-eid/ha-addon-mcp-{arch}
+# Use registry image
+image: ghcr.io/mar-eid/ha-addon-mcp-{arch}
 
 ports:
   8099/tcp: 8099
 
 map:
   - config:rw
+
+services:
+  - postgresql:want
 
 options:
   pg_host: a0d7b954-postgresql
@@ -36,7 +39,7 @@ options:
   pg_password: ""
   read_only: true
   enable_timescaledb: false
-  log_level: debug
+  log_level: info
   query_timeout: 30
   max_query_days: 90
 
