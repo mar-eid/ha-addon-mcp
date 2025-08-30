@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.7] - 2025-08-29
+
+### Fixed
+- **⚠️ Critical JavaScript Errors**: Fixed undefined `timestamp` variable causing web interface crashes
+- **🌐 Web Server Crashes**: Resolved server crashes when accessing root endpoint (`/`)
+- **💻 HTML Template Issues**: Fixed malformed JavaScript in web interface template
+- **🔧 String Formatting**: Corrected Python f-string formatting issues in HTML responses
+
+### Enhanced
+- **🌐 Stable Web Interface**: Complete rewrite of HTML template with proper JavaScript
+- **🧨 Error Handling**: Improved error handling for web interface rendering
+- **📱 Responsive Design**: Better mobile-friendly web interface
+- **⚙️ Simplified Core**: Streamlined to essential MCP tools for better stability
+
+### Technical Details
+- Fixed JavaScript `NameError: name 'timestamp' is not defined` on line 968
+- Rewrote all JavaScript functions with proper variable declarations
+- Cleaned up HTML template string formatting to prevent parsing errors
+- Added proper DOM manipulation with error handling
+- Simplified MCP tool registry to core functionality
+
+### Web Interface
+- **Working Test Buttons**: All test functions now work properly
+- **Clean Output Display**: Properly formatted test results
+- **Safe JavaScript**: No undefined variables or syntax errors
+- **Mobile Responsive**: Better display on mobile devices
+
 ## [0.3.6] - 2025-08-29
 
 ### Added
