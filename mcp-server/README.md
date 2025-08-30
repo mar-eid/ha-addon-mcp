@@ -106,6 +106,138 @@ To enable AI assistants to use this server:
    - "Show me energy consumption for the past week"
    - "List all sensors with historical data"
 
+## MCP Protocol Support
+
+### **Transport Methods**
+
+This server supports multiple MCP transport methods:
+
+#### **1. JSON-RPC over HTTP (Primary)**
+```bash
+# Endpoint: POST /mcp
+# Content-Type: application/json
+# Protocol: JSON-RPC 2.0
+
+# Example request:
+curl -X POST http://localhost:8099/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": "1",
+    "method": "tools/list"
+  }'
+```
+
+#### **2. Server-Sent Events (SSE) - Alternative Transport**
+```bash
+# SSE Endpoint: GET /mcp (for streaming)
+# Used by some MCP clients for real-time communication
+# Provides bidirectional communication over HTTP
+
+# SSE Connection:
+curl -N -H "Accept: text/event-stream" http://localhost:8099/mcp
+
+# SSE Events:
+# - endpoint: Announces available endpoints
+# - initialized: Server initialization complete
+# - ping: Keep-alive messages (every 30s)
+```
+
+#### **3. WebSocket Support (Future)**
+```bash
+# WebSocket endpoint: ws://localhost:8099/ws
+# Not yet implemented - use HTTP/SSE for now
+```
+
+### **MCP Protocol Compliance**
+
+This server implements **MCP Protocol 2024-11-05** with:
+
+- ✅ **Initialize handshake**: Capability negotiation
+- ✅ **Tool discovery**: `tools/list` method
+- ✅ **Tool execution**: `tools/call` method  
+- ✅ **Error handling**: Standard JSON-RPC error codes
+- ✅ **Request/Response**: Full JSON-RPC 2.0 compliance
+- ✅ **SSE Transport**: Real-time event streaming
+- ✅ **Batch requests**: Multiple operations in one request
+
+### **Client Compatibility**
+
+Tested and compatible with:
+- **Home Assistant MCP Integration** (Primary target)
+- **Claude Desktop MCP Client**
+- **OpenAI Custom Actions** (via HTTP)
+- **Generic MCP Clients** (JSON-RPC 2.0)
+- **SSE-compatible clients** (real-time streaming)
+
+### **SSE Connection Details**
+
+For clients that prefer Server-Sent Events:
+
+```javascript
+// JavaScript SSE client example
+const eventSource = new EventSource('http://localhost:8099/mcp');
+
+eventSource.onmessage = function(event) {
+  const data = JSON.parse(event.data);
+  console.log('MCP Event:', data);
+  
+  // Handle different event types
+  switch(data.method) {
+    case 'endpoint':
+      console.log('Available endpoint:', data.params.endpoint);
+      break;
+    case 'notifications/initialized':
+      console.log('Server initialized:', data.params.serverInfo);
+      break;
+    case 'notifications/ping':
+      console.log('Keep-alive ping');
+      break;
+  }
+};
+
+eventSource.onerror = function(event) {
+  console.error('SSE connection error');
+};
+```
+
+```python
+# Python SSE client example
+import sseclient
+import json
+
+def connect_sse():
+    response = requests.get('http://localhost:8099/mcp', 
+                          headers={'Accept': 'text/event-stream'},
+                          stream=True)
+    
+    client = sseclient.SSEClient(response)
+    for event in client.events():
+        data = json.loads(event.data)
+        print(f"SSE Event: {data}")
+```
+
+### **Protocol Selection**
+
+Most MCP clients will auto-detect the best transport:
+
+1. **HTTP POST** (Recommended): Simple, reliable, works everywhere
+2. **SSE** (Alternative): Real-time events, better for streaming
+3. **WebSocket** (Future): Full bidirectional, lowest latency
+
+### **Advanced Configuration**
+
+For advanced MCP client configurations:
+
+```yaml
+# Home Assistant MCP Integration Config
+server_url: "http://localhost:8099/mcp"
+transport: "http"              # or "sse"
+timeout: 30                    # seconds
+keep_alive: true              # for SSE connections
+max_retries: 3                # connection retries
+```
+
 ## Available MCP Tools
 
 The add-on provides 5 MCP tools for AI assistants:

@@ -41,7 +41,7 @@ if log_level == "DEBUG":
     logging.getLogger("psycopg2").setLevel(logging.DEBUG)
     logger.debug("🔍 Debug logging enabled - full stack traces will be shown")
 
-app = FastAPI(title="Home Assistant MCP Server", version="0.3.7")
+app = FastAPI(title="Home Assistant MCP Server", version="0.3.8")
 
 # Configuration from environment
 READ_ONLY = os.getenv("MCP_READ_ONLY", "true").lower() == "true"
@@ -320,7 +320,7 @@ def handle_addon_health(params: Dict[str, Any]) -> MCPToolResult:
         
         result = {
             "addon_status": "running",
-            "version": "0.3.7",
+            "version": "0.3.8",
             "database_connected": db_connected,
             "database_config": {
                 "host": DB_CONFIG["host"],
@@ -385,6 +385,86 @@ MCP_TOOLS = {
 }
 
 # Main MCP Protocol Endpoint with enhanced debug logging
+@app.get("/mcp")
+async def mcp_sse_endpoint(request: Request):
+    """
+    SSE endpoint for MCP protocol - Server-Sent Events transport
+    Used by MCP clients that prefer streaming connections
+    """
+    client_info = f"{request.client.host}:{request.client.port}" if request.client else "unknown"
+    logger.debug(f"SSE MCP endpoint called by client: {client_info}")
+    
+    async def sse_stream():
+        try:
+            # Send endpoint announcement
+            endpoint_event = {
+                "jsonrpc": "2.0",
+                "method": "endpoint",
+                "params": {
+                    "endpoint": {
+                        "method": "POST",
+                        "path": "/mcp"
+                    }
+                }
+            }
+            yield f"data: {json.dumps(endpoint_event)}\n\n"
+            logger.debug(f"Sent SSE endpoint announcement to {client_info}")
+            
+            # Send initialization
+            init_event = {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized", 
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "serverInfo": {
+                        "name": "Home Assistant MCP Server",
+                        "version": "0.3.8"
+                    },
+                    "capabilities": {
+                        "tools": {}
+                    }
+                }
+            }
+            yield f"data: {json.dumps(init_event)}\n\n"
+            logger.debug(f"Sent SSE initialization to {client_info}")
+            
+            # Keep connection alive with pings
+            ping_count = 0
+            while True:
+                await asyncio.sleep(30)  # Ping every 30 seconds
+                ping_count += 1
+                ping_event = {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/ping",
+                    "params": {
+                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "sequence": ping_count
+                    }
+                }
+                yield f"data: {json.dumps(ping_event)}\n\n"
+                logger.debug(f"Sent SSE ping #{ping_count} to {client_info}")
+                
+        except asyncio.CancelledError:
+            logger.info(f"SSE client {client_info} disconnected")
+            break
+        except Exception as e:
+            logger.error(f"SSE stream error for {client_info}: {e}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"SSE error traceback:\n{traceback.format_exc()}")
+            break
+    
+    return StreamingResponse(
+        sse_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST",
+            "Access-Control-Allow-Headers": "Accept, Authorization, Content-Type"
+        }
+    )
+
 @app.post("/mcp")
 async def mcp_endpoint(request: Request):
     """
@@ -554,7 +634,7 @@ def health():
     
     return {
         "status": "healthy",
-        "version": "0.3.7",
+        "version": "0.3.8",
         "database": db_status,
         "read_only": READ_ONLY,
         "timescaledb": ENABLE_TIMESCALEDB,
@@ -578,7 +658,7 @@ def root():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Home Assistant MCP Server v0.3.7</title>
+        <title>Home Assistant MCP Server v0.3.8</title>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
@@ -685,7 +765,7 @@ def root():
     </head>
     <body>
         <div class="header">
-            <h1>🤖 Home Assistant MCP Server v0.3.7</h1>
+            <h1>🤖 Home Assistant MCP Server v0.3.8</h1>
             <p>Model Context Protocol server for querying Home Assistant historical data</p>
         </div>
         
@@ -719,9 +799,11 @@ def root():
                     <button onclick="testHealth()">Test Health</button>
                     <button onclick="testTools()">Test Tools List</button>
                     <button onclick="testHistory()">Test Get History</button>
+                    <button onclick="testSSE()">Test SSE Stream</button>
+                    <button onclick="stopSSE()">Stop SSE</button>
                     <button onclick="clearOutput()">Clear Output</button>
                     
-                    <div class="test-output" id="testOutput">Welcome to Home Assistant MCP Server v0.3.7!
+                    <div class="test-output" id="testOutput">Welcome to Home Assistant MCP Server v0.3.8!
 
 Ready to serve historical data to AI assistants via MCP protocol.
 Click test buttons above to verify functionality.
@@ -839,7 +921,7 @@ Available Tools: {len(MCP_TOOLS)}
 
 def main():
     """Enhanced main function with comprehensive debug logging"""
-    logger.info("🚀 Starting Home Assistant MCP Server v0.3.7...")
+    logger.info("🚀 Starting Home Assistant MCP Server v0.3.8...")
     logger.info(f"📊 Database: {DB_CONFIG['user']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
     logger.info(f"🔒 Read-only mode: {READ_ONLY}")
     logger.info(f"⚡ TimescaleDB: {ENABLE_TIMESCALEDB}")

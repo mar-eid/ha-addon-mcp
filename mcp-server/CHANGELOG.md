@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.8] - 2025-08-29
+
+### Documentation
+- **📚 Troubleshooting Guide**: Added comprehensive MCP Client integration troubleshooting
+- **🔍 Debug Instructions**: Detailed debugging steps for official HA MCP Client integration
+- **⚙️ Configuration Examples**: Common setup scenarios and error solutions
+- **🌐 Network Connectivity**: Add-on to integration communication guide
+
+### Added
+- **📋 Integration Support**: Enhanced compatibility with official Home Assistant MCP Client
+- **🔧 Debug Commands**: Quick troubleshooting commands and tests
+- **📄 Error Reference**: Common error messages and their solutions
+- **🏗️ Setup Examples**: Multiple configuration approaches and alternatives
+
+### Technical Details
+- Documented official MCP Client integration troubleshooting workflow
+- Added network connectivity testing procedures
+- Provided alternative integration methods when MCP Client unavailable
+- Enhanced server compliance verification steps
+
 ## [0.3.7] - 2025-08-29
 
 ### Fixed
