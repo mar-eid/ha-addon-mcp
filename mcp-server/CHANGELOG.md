@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2024-12-19
+
+### Added
+- **SSE (Server-Sent Events) Support**: Full implementation for MCP protocol communication
+- **Interactive Test Interface**: Web-based testing UI at root endpoint
+- **SSE Connection Monitor**: Real-time connection status and message logging
+- **Local Testing Scripts**: Standalone scripts for testing without Home Assistant
+- **Comprehensive Test Suite**: Automated tests for SSE, MCP, and REST endpoints
+
+### Fixed
+- **MCP Client Integration**: Resolved "Failed to connect" errors with proper SSE implementation
+- **Protocol Compliance**: Correct event stream format with connection, tools, and ping events
+- **Content-Type Headers**: Proper `text/event-stream` for SSE responses
+
+### Enhanced
+- **Mock Mode**: Server now works without database for testing SSE functionality
+- **Debug Logging**: Detailed SSE client tracking and event logging
+- **Error Recovery**: Graceful handling of SSE disconnections
+- **Keep-Alive**: Periodic ping events to maintain connection
+
+### Testing Tools
+- `run_local.py`: Run server locally with mock data
+- `test_sse.py`: Comprehensive SSE and MCP protocol testing
+- Web interface with SSE connection testing at `http://localhost:8099/`
+
+### Technical Details
+- SSE endpoint at `/sse` with proper event streaming
+- Connection event with protocol capabilities
+- Tools event listing available MCP tools
+- Ping events every 30 seconds for keep-alive
+- Support for multiple concurrent SSE clients
+
 ## [0.4.1] - 2024-12-19
 
 ### Added

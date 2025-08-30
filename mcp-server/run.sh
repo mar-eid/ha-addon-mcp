@@ -4,7 +4,7 @@
 # Direct run script (no s6-overlay complexity)
 # ==============================================================================
 
-echo "🚀 Starting MCP Server v0.4.1 (Direct Launch)..."
+echo "🚀 Starting MCP Server v0.4.2 (Direct Launch)..."
 
 # Read configuration from Home Assistant
 PG_HOST=$(bashio::config 'pg_host')

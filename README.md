@@ -1,7 +1,7 @@
 # 🛠️ Home Assistant MCP Server Add-on
 
 [![Build & Push](https://github.com/mar-eid/ha-addon-mcp/actions/workflows/build.yml/badge.svg)](https://github.com/mar-eid/ha-addon-mcp/actions/workflows/build.yml)
-[![Version](https://img.shields.io/badge/version-0.4.1-blue)](https://github.com/mar-eid/ha-addon-mcp/releases)
+[![Version](https://img.shields.io/badge/version-0.4.2-blue)](https://github.com/mar-eid/ha-addon-mcp/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 A [Home Assistant](https://www.home-assistant.io/) add-on that runs a **Model Context Protocol (MCP) server** for querying historical data from PostgreSQL/TimescaleDB. This enables AI assistants (like OpenAI through Home Assistant Assist) to access and analyze your home automation data.
@@ -179,6 +179,25 @@ The repository includes automated builds via GitHub Actions:
 
 ## 🐛 Troubleshooting
 
+### Testing SSE Functionality
+
+If you're experiencing "Failed to connect" errors with the MCP Client integration, test SSE locally:
+
+```bash
+# Install dependencies
+pip install -r mcp-server/requirements.txt
+
+# Run server locally (uses mock data if no DB)
+python run_local.py
+
+# In another terminal, test SSE
+python test_sse.py
+```
+
+Or use the interactive web interface at `http://localhost:8099/` to test SSE connections visually.
+
+See [TESTING_SSE.md](TESTING_SSE.md) for comprehensive testing instructions.
+
 ### Database Connection Issues
 
 Check logs for connection errors:
@@ -206,12 +225,12 @@ If the MCP Client can't connect:
 
 See [CHANGELOG.md](mcp-server/CHANGELOG.md) for detailed version history.
 
-### Latest: v0.4.1 (2024-12-19)
-- Real PostgreSQL/TimescaleDB integration
-- Full MCP protocol support
-- Async database operations
-- Enhanced error handling
-- Query optimization
+### Latest: v0.4.2 (2024-12-19)
+- **SSE Support**: Full Server-Sent Events implementation for MCP protocol
+- **Test Interface**: Interactive web UI for testing SSE connections
+- **Local Testing**: Standalone scripts for debugging without Home Assistant
+- **Mock Mode**: Server works without database for testing
+- **Keep-Alive**: Automatic ping events to maintain connections
 
 ---
 

@@ -1,12 +1,16 @@
 ARG BUILD_FROM
 FROM $BUILD_FROM
 
-# Install minimal system dependencies  
+# Install runtime dependencies
 RUN apk add --no-cache \
     python3 \
     py3-pip \
     postgresql-client \
     curl \
+    libpq
+
+# Install build dependencies temporarily
+RUN apk add --no-cache --virtual .build-deps \
     gcc \
     musl-dev \
     postgresql-dev
@@ -16,7 +20,8 @@ WORKDIR /app
 
 # Copy and install Python packages
 COPY requirements.txt ./
-RUN pip3 install --break-system-packages --no-cache-dir -r requirements.txt
+RUN pip3 install --break-system-packages --no-cache-dir -r requirements.txt && \
+    apk del .build-deps
 
 # Copy application and run script
 COPY server.py ./

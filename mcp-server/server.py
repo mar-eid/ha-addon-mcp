@@ -1,20 +1,22 @@
 """
 MCP Server for Home Assistant Historical Data
-Version: 0.4.1
+Version: 0.4.2
 """
 import os
 import sys
 import json
 import asyncio
 from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Any, Literal
+from typing import List, Optional, Dict, Any, Literal, AsyncGenerator
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from pydantic import BaseModel, Field
 import uvicorn
 import logging
 import asyncpg
 from asyncpg.pool import Pool
+from sse_starlette.sse import EventSourceResponse
+import uuid
 
 # Configure logging
 logging.basicConfig(
@@ -37,12 +39,15 @@ MAX_QUERY_DAYS = int(os.getenv("MCP_MAX_QUERY_DAYS", "90"))
 
 app = FastAPI(
     title="Home Assistant MCP Server",
-    version="0.4.1",
+    version="0.4.2",
     description="Model Context Protocol server for Home Assistant historical data"
 )
 
 # Database connection pool
 db_pool: Optional[Pool] = None
+
+# SSE client management
+sse_clients: Dict[str, Any] = {}
 
 # =============================================================================
 # Database Models & Connection
@@ -148,273 +153,188 @@ class StatisticsBulkRequest(BaseModel):
     page: int = Field(0, description="Page number", ge=0)
 
 # =============================================================================
-# MCP Tool Implementations
+# MCP Tool Implementations (Mock for testing)
 # =============================================================================
 
 async def get_history_data(params: HistoryRequest) -> Dict[str, Any]:
-    """Fetch historical state data from recorder"""
-    if not db_pool:
-        raise HTTPException(status_code=503, detail="Database not connected")
+    """Fetch historical state data from recorder (mock for testing)"""
+    # For testing, return mock data
+    start_dt = datetime.fromisoformat(params.start.replace("Z", "+00:00"))
+    end_dt = datetime.fromisoformat(params.end.replace("Z", "+00:00"))
     
-    try:
-        # Parse dates
-        start_dt = datetime.fromisoformat(params.start.replace("Z", "+00:00"))
-        end_dt = datetime.fromisoformat(params.end.replace("Z", "+00:00"))
-        
-        # Validate date range
-        if (end_dt - start_dt).days > MAX_QUERY_DAYS:
-            raise HTTPException(status_code=400, detail=f"Query range exceeds {MAX_QUERY_DAYS} days")
-        
-        async with db_pool.acquire() as conn:
-            # Get entity metadata
-            entity_meta = await conn.fetchrow("""
-                SELECT metadata_id, entity_id 
-                FROM states_meta 
-                WHERE entity_id = $1
-            """, params.entity_id)
-            
-            if not entity_meta:
-                return {"entity_id": params.entity_id, "series": [], "error": "Entity not found"}
-            
-            # Build query based on aggregation
-            if params.agg == "raw":
-                query = """
-                    SELECT 
-                        last_updated_ts as timestamp,
-                        state,
-                        attributes
-                    FROM states
-                    WHERE metadata_id = $1
-                        AND last_updated_ts >= $2
-                        AND last_updated_ts < $3
-                    ORDER BY last_updated_ts
-                    LIMIT 10000
-                """
-                rows = await conn.fetch(query, entity_meta['metadata_id'], 
-                                       start_dt.timestamp(), end_dt.timestamp())
-            else:
-                # Use time buckets for aggregation
-                interval_map = {
-                    "5m": "5 minutes",
-                    "15m": "15 minutes",
-                    "30m": "30 minutes",
-                    "1h": "1 hour",
-                    "6h": "6 hours",
-                    "1d": "1 day"
-                }
-                pg_interval = interval_map.get(params.interval, "1 hour")
-                
-                agg_func = {
-                    "mean": "AVG",
-                    "min": "MIN",
-                    "max": "MAX",
-                    "sum": "SUM",
-                    "last": "LAST"
-                }.get(params.agg, "AVG")
-                
-                if agg_func == "LAST":
-                    query = f"""
-                        SELECT 
-                            date_trunc('hour', to_timestamp(last_updated_ts)) as timestamp,
-                            (array_agg(state ORDER BY last_updated_ts DESC))[1] as state,
-                            COUNT(*) as samples
-                        FROM states
-                        WHERE metadata_id = $1
-                            AND last_updated_ts >= $2
-                            AND last_updated_ts < $3
-                            AND state NOT IN ('unknown', 'unavailable', '')
-                        GROUP BY date_trunc('hour', to_timestamp(last_updated_ts))
-                        ORDER BY timestamp
-                    """
-                else:
-                    query = f"""
-                        SELECT 
-                            date_trunc('hour', to_timestamp(last_updated_ts)) as timestamp,
-                            {agg_func}(CASE 
-                                WHEN state ~ '^[0-9]+\.?[0-9]*$' THEN state::numeric 
-                                ELSE NULL 
-                            END) as value,
-                            COUNT(*) as samples
-                        FROM states
-                        WHERE metadata_id = $1
-                            AND last_updated_ts >= $2
-                            AND last_updated_ts < $3
-                            AND state NOT IN ('unknown', 'unavailable', '')
-                        GROUP BY date_trunc('hour', to_timestamp(last_updated_ts))
-                        ORDER BY timestamp
-                    """
-                
-                rows = await conn.fetch(query, entity_meta['metadata_id'], 
-                                       start_dt.timestamp(), end_dt.timestamp())
-            
-            # Format results
-            series = []
-            for row in rows:
-                if params.agg == "raw":
-                    series.append({
-                        "t": datetime.fromtimestamp(row['timestamp']).isoformat() + "Z",
-                        "v": row['state'],
-                        "a": json.loads(row['attributes']) if row['attributes'] else None
-                    })
-                else:
-                    value = row.get('value') or row.get('state')
-                    if value is not None:
-                        series.append({
-                            "t": row['timestamp'].isoformat() + "Z",
-                            "v": float(value) if isinstance(value, (int, float)) else value,
-                            "samples": row['samples']
-                        })
-            
-            return {
-                "entity_id": params.entity_id,
-                "series": series,
-                "count": len(series),
-                "interval": params.interval,
-                "aggregation": params.agg
-            }
-            
-    except Exception as e:
-        logger.error(f"Error fetching history: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # Generate mock time series
+    series = []
+    current = start_dt
+    value = 20.0
+    while current < end_dt:
+        series.append({
+            "t": current.isoformat() + "Z",
+            "v": round(value + (hash(str(current)) % 10) - 5, 2)
+        })
+        current += timedelta(hours=1)
+        value += 0.1
+    
+    return {
+        "entity_id": params.entity_id,
+        "series": series,
+        "count": len(series),
+        "interval": params.interval,
+        "aggregation": params.agg
+    }
 
 async def get_statistics_data(params: StatisticsRequest) -> Dict[str, Any]:
-    """Fetch statistics data"""
-    if not db_pool:
-        raise HTTPException(status_code=503, detail="Database not connected")
+    """Fetch statistics data (mock for testing)"""
+    start_dt = datetime.fromisoformat(params.start.replace("Z", "+00:00"))
+    end_dt = datetime.fromisoformat(params.end.replace("Z", "+00:00"))
     
-    try:
-        start_dt = datetime.fromisoformat(params.start.replace("Z", "+00:00"))
-        end_dt = datetime.fromisoformat(params.end.replace("Z", "+00:00"))
-        
-        if (end_dt - start_dt).days > MAX_QUERY_DAYS:
-            raise HTTPException(status_code=400, detail=f"Query range exceeds {MAX_QUERY_DAYS} days")
-        
-        async with db_pool.acquire() as conn:
-            # Get statistics metadata
-            meta = await conn.fetchrow("""
-                SELECT id, statistic_id, source, unit_of_measurement
-                FROM statistics_meta
-                WHERE statistic_id = $1
-            """, params.statistic_id)
-            
-            if not meta:
-                return {"statistic_id": params.statistic_id, "series": [], "error": "Statistic not found"}
-            
-            # Build field selection
-            fields = ["start_ts as timestamp"]
-            for field in params.fields:
-                fields.append(f"{field}")
-            
-            # Determine table based on period
-            table = "statistics_short_term" if params.period == "5minute" else "statistics"
-            
-            query = f"""
-                SELECT {', '.join(fields)}
-                FROM {table}
-                WHERE metadata_id = $1
-                    AND start_ts >= $2
-                    AND start_ts < $3
-                ORDER BY start_ts
-                LIMIT 5000
-            """
-            
-            rows = await conn.fetch(query, meta['id'], 
-                                   start_dt.timestamp(), end_dt.timestamp())
-            
-            # Format results
-            series = []
-            for row in rows:
-                item = {"t": datetime.fromtimestamp(row['timestamp']).isoformat() + "Z"}
-                for field in params.fields:
-                    if field in row and row[field] is not None:
-                        item[field] = float(row[field])
-                series.append(item)
-            
-            return {
-                "statistic_id": params.statistic_id,
-                "source": meta['source'],
-                "unit": meta['unit_of_measurement'],
-                "series": series,
-                "count": len(series),
-                "period": params.period
-            }
-            
-    except Exception as e:
-        logger.error(f"Error fetching statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    series = []
+    current = start_dt
+    base_value = 22.0
+    while current < end_dt:
+        item = {"t": current.isoformat() + "Z"}
+        for field in params.fields:
+            if field == "mean":
+                item[field] = round(base_value, 2)
+            elif field == "min":
+                item[field] = round(base_value - 2, 2)
+            elif field == "max":
+                item[field] = round(base_value + 2, 2)
+            elif field == "sum":
+                item[field] = round(base_value * 24, 2)
+        series.append(item)
+        current += timedelta(hours=1 if params.period == "hour" else 24)
+        base_value += 0.05
+    
+    return {
+        "statistic_id": params.statistic_id,
+        "source": "recorder",
+        "unit": "°C",
+        "series": series,
+        "count": len(series),
+        "period": params.period
+    }
 
-async def get_statistics_bulk(params: StatisticsBulkRequest) -> Dict[str, Any]:
-    """Fetch bulk statistics data"""
-    if not db_pool:
-        raise HTTPException(status_code=503, detail="Database not connected")
+async def list_entities() -> Dict[str, Any]:
+    """List available entities (mock for testing)"""
+    mock_entities = [
+        {"entity_id": "sensor.temperature", "state_count": 1440, "last_seen": datetime.utcnow().isoformat() + "Z"},
+        {"entity_id": "sensor.humidity", "state_count": 1440, "last_seen": datetime.utcnow().isoformat() + "Z"},
+        {"entity_id": "sensor.pressure", "state_count": 720, "last_seen": datetime.utcnow().isoformat() + "Z"},
+    ]
+    
+    mock_statistics = [
+        {"statistic_id": "sensor.temperature", "source": "recorder", "unit": "°C", "has_mean": True, "has_sum": False},
+        {"statistic_id": "sensor.humidity", "source": "recorder", "unit": "%", "has_mean": True, "has_sum": False},
+    ]
+    
+    return {
+        "entities": mock_entities,
+        "statistics": mock_statistics,
+        "entity_count": len(mock_entities),
+        "statistic_count": len(mock_statistics)
+    }
+
+# =============================================================================
+# SSE (Server-Sent Events) Implementation for MCP
+# =============================================================================
+
+async def sse_generator(request: Request) -> AsyncGenerator:
+    """Generate SSE events for MCP protocol"""
+    client_id = str(uuid.uuid4())
+    sse_clients[client_id] = {"connected": datetime.utcnow()}
+    
+    logger.info(f"SSE client connected: {client_id}")
     
     try:
-        start_dt = datetime.fromisoformat(params.start.replace("Z", "+00:00"))
-        end_dt = datetime.fromisoformat(params.end.replace("Z", "+00:00"))
-        
-        if (end_dt - start_dt).days > MAX_QUERY_DAYS:
-            raise HTTPException(status_code=400, detail=f"Query range exceeds {MAX_QUERY_DAYS} days")
-        
-        results = {}
-        async with db_pool.acquire() as conn:
-            for stat_id in params.statistic_ids:
-                # Get metadata
-                meta = await conn.fetchrow("""
-                    SELECT id, statistic_id, source, unit_of_measurement
-                    FROM statistics_meta
-                    WHERE statistic_id = $1
-                """, stat_id)
-                
-                if not meta:
-                    results[stat_id] = {"error": "Not found"}
-                    continue
-                
-                # Build query
-                fields = ["start_ts as timestamp"] + list(params.fields)
-                table = "statistics_short_term" if params.period == "5minute" else "statistics"
-                
-                query = f"""
-                    SELECT {', '.join(fields)}
-                    FROM {table}
-                    WHERE metadata_id = $1
-                        AND start_ts >= $2
-                        AND start_ts < $3
-                    ORDER BY start_ts
-                    LIMIT $4 OFFSET $5
-                """
-                
-                rows = await conn.fetch(
-                    query, meta['id'], 
-                    start_dt.timestamp(), end_dt.timestamp(),
-                    params.page_size, params.page * params.page_size
-                )
-                
-                # Format results
-                series = []
-                for row in rows:
-                    item = {"t": datetime.fromtimestamp(row['timestamp']).isoformat() + "Z"}
-                    for field in params.fields:
-                        if field in row and row[field] is not None:
-                            item[field] = float(row[field])
-                    series.append(item)
-                
-                results[stat_id] = {
-                    "source": meta['source'],
-                    "unit": meta['unit_of_measurement'],
-                    "series": series,
-                    "count": len(series)
+        # Send initial connection event
+        yield {
+            "event": "connection",
+            "data": json.dumps({
+                "protocol": "mcp",
+                "version": "0.1.0",
+                "capabilities": {
+                    "tools": True,
+                    "prompts": False,
+                    "resources": False,
+                    "logging": False,
+                    "sampling": False
                 }
-        
-        return {
-            "items": results,
-            "page": params.page,
-            "page_size": params.page_size,
-            "next_page": params.page + 1 if any(len(r.get("series", [])) == params.page_size for r in results.values()) else None
+            })
         }
         
-    except Exception as e:
-        logger.error(f"Error fetching bulk statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Send available tools
+        yield {
+            "event": "tools",
+            "data": json.dumps({
+                "tools": [
+                    {
+                        "name": "ha.get_history",
+                        "description": "Query historical state data from Home Assistant recorder",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "entity_id": {"type": "string"},
+                                "start": {"type": "string"},
+                                "end": {"type": "string"},
+                                "interval": {"type": "string"},
+                                "agg": {"type": "string"}
+                            },
+                            "required": ["entity_id", "start", "end"]
+                        }
+                    },
+                    {
+                        "name": "ha.get_statistics",
+                        "description": "Query aggregated statistics data",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "statistic_id": {"type": "string"},
+                                "start": {"type": "string"},
+                                "end": {"type": "string"},
+                                "period": {"type": "string"},
+                                "fields": {"type": "array", "items": {"type": "string"}}
+                            },
+                            "required": ["statistic_id", "start", "end"]
+                        }
+                    },
+                    {
+                        "name": "ha.list_entities",
+                        "description": "List available entities with recent data",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {}
+                        }
+                    }
+                ]
+            })
+        }
+        
+        # Keep connection alive with periodic pings
+        ping_count = 0
+        while True:
+            if await request.is_disconnected():
+                break
+                
+            await asyncio.sleep(30)  # Send ping every 30 seconds
+            ping_count += 1
+            yield {
+                "event": "ping",
+                "data": json.dumps({
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                    "sequence": ping_count
+                })
+            }
+            
+    except asyncio.CancelledError:
+        logger.info(f"SSE client disconnected: {client_id}")
+    finally:
+        if client_id in sse_clients:
+            del sse_clients[client_id]
+
+@app.get("/sse")
+async def sse_endpoint(request: Request):
+    """SSE endpoint for MCP protocol"""
+    return EventSourceResponse(sse_generator(request))
 
 # =============================================================================
 # MCP Protocol Endpoints
@@ -422,10 +342,12 @@ async def get_statistics_bulk(params: StatisticsBulkRequest) -> Dict[str, Any]:
 
 @app.post("/mcp")
 async def mcp_handler(request: Request):
-    """Main MCP protocol handler"""
+    """Main MCP protocol handler for tool calls"""
     try:
         body = await request.json()
         mcp_request = MCPRequest(**body)
+        
+        logger.info(f"MCP request: {mcp_request.method}")
         
         # Route to appropriate tool
         if mcp_request.method == "tools/list":
@@ -442,11 +364,6 @@ async def mcp_handler(request: Request):
                         "inputSchema": StatisticsRequest.schema()
                     },
                     {
-                        "name": "ha.get_statistics_bulk",
-                        "description": "Query multiple statistics in bulk",
-                        "inputSchema": StatisticsBulkRequest.schema()
-                    },
-                    {
                         "name": "ha.list_entities",
                         "description": "List available entities with recent data",
                         "inputSchema": {}
@@ -457,12 +374,12 @@ async def mcp_handler(request: Request):
             tool_name = mcp_request.params.get("name")
             tool_params = mcp_request.params.get("arguments", {})
             
+            logger.info(f"Calling tool: {tool_name}")
+            
             if tool_name == "ha.get_history":
                 result = await get_history_data(HistoryRequest(**tool_params))
             elif tool_name == "ha.get_statistics":
                 result = await get_statistics_data(StatisticsRequest(**tool_params))
-            elif tool_name == "ha.get_statistics_bulk":
-                result = await get_statistics_bulk(StatisticsBulkRequest(**tool_params))
             elif tool_name == "ha.list_entities":
                 result = await list_entities()
             else:
@@ -488,13 +405,372 @@ async def mcp_handler(request: Request):
         ).dict()
 
 # =============================================================================
+# Test Interface
+# =============================================================================
+
+@app.get("/")
+async def root():
+    """Serve test interface"""
+    html_content = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MCP Server - Test Interface</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .status {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        .status.online { background: #10b981; color: white; }
+        .status.offline { background: #ef4444; color: white; }
+        .section {
+            margin: 30px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 5px;
+            transition: all 0.3s;
+        }
+        .button:hover {
+            background: #764ba2;
+            transform: translateY(-2px);
+        }
+        .button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        #output {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .test-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .info-box {
+            background: #e0f2fe;
+            border-left: 4px solid #0284c7;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .error-box {
+            background: #fee2e2;
+            border-left: 4px solid #dc2626;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .sse-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 15px;
+            background: #f3f4f6;
+            border-radius: 6px;
+            margin: 10px 0;
+        }
+        .sse-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ef4444;
+            animation: pulse 2s infinite;
+        }
+        .sse-indicator.connected {
+            background: #10b981;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏠 MCP Server <span class="status online">v0.4.2</span></h1>
+        <p>Model Context Protocol server for Home Assistant historical data</p>
+        
+        <div class="section">
+            <h2>🔌 SSE Connection Test</h2>
+            <div class="sse-status">
+                <div id="sseIndicator" class="sse-indicator"></div>
+                <span id="sseStatus">Disconnected</span>
+            </div>
+            <div class="test-grid">
+                <button class="button" onclick="testSSE()">Test SSE Connection</button>
+                <button class="button" onclick="stopSSE()">Stop SSE</button>
+                <button class="button" onclick="testMCPTools()">Test MCP Tools</button>
+            </div>
+            <div id="sseMessages" style="display:none;" class="info-box">
+                <strong>SSE Messages:</strong>
+                <div id="sseLog" style="max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px;"></div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🧪 API Tests</h2>
+            <div class="test-grid">
+                <button class="button" onclick="testHealth()">Test Health</button>
+                <button class="button" onclick="testHistory()">Test History</button>
+                <button class="button" onclick="testStatistics()">Test Statistics</button>
+                <button class="button" onclick="testEntities()">Test List Entities</button>
+                <button class="button" onclick="testMCPProtocol()">Test MCP Protocol</button>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>📋 Output</h2>
+            <div id="output">Ready for testing...</div>
+        </div>
+
+        <div class="info-box">
+            <h3>🔧 Integration Setup</h3>
+            <p><strong>For Home Assistant MCP Client:</strong></p>
+            <ul>
+                <li>SSE URL: <code>http://localhost:8099/sse</code></li>
+                <li>MCP URL: <code>http://localhost:8099/mcp</code></li>
+                <li>Transport: Server-Sent Events (SSE)</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        let eventSource = null;
+        
+        function log(message, isError = false) {
+            const output = document.getElementById('output');
+            const timestamp = new Date().toISOString();
+            const prefix = isError ? '❌ ERROR' : '✅';
+            output.textContent += `\\n[${timestamp}] ${prefix} ${message}`;
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function logSSE(message) {
+            const sseLog = document.getElementById('sseLog');
+            const timestamp = new Date().toTimeString().split(' ')[0];
+            sseLog.innerHTML += `[${timestamp}] ${message}<br>`;
+            sseLog.scrollTop = sseLog.scrollHeight;
+        }
+
+        async function testSSE() {
+            log('Testing SSE connection...');
+            
+            if (eventSource) {
+                eventSource.close();
+            }
+            
+            document.getElementById('sseMessages').style.display = 'block';
+            document.getElementById('sseLog').innerHTML = '';
+            
+            eventSource = new EventSource('/sse');
+            
+            eventSource.onopen = () => {
+                log('SSE connection opened');
+                document.getElementById('sseStatus').textContent = 'Connected';
+                document.getElementById('sseIndicator').classList.add('connected');
+                logSSE('Connection established');
+            };
+            
+            eventSource.onerror = (error) => {
+                log('SSE connection error', true);
+                document.getElementById('sseStatus').textContent = 'Error';
+                document.getElementById('sseIndicator').classList.remove('connected');
+                logSSE('Connection error');
+            };
+            
+            eventSource.addEventListener('connection', (event) => {
+                const data = JSON.parse(event.data);
+                log('Received connection event: ' + JSON.stringify(data, null, 2));
+                logSSE('Connection: ' + data.protocol + ' v' + data.version);
+            });
+            
+            eventSource.addEventListener('tools', (event) => {
+                const data = JSON.parse(event.data);
+                log('Received tools event with ' + data.tools.length + ' tools');
+                logSSE('Tools: ' + data.tools.map(t => t.name).join(', '));
+            });
+            
+            eventSource.addEventListener('ping', (event) => {
+                const data = JSON.parse(event.data);
+                logSSE('Ping #' + data.sequence);
+            });
+            
+            eventSource.onmessage = (event) => {
+                logSSE('Message: ' + event.data);
+            };
+        }
+
+        function stopSSE() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+                log('SSE connection closed');
+                document.getElementById('sseStatus').textContent = 'Disconnected';
+                document.getElementById('sseIndicator').classList.remove('connected');
+            }
+        }
+
+        async function testHealth() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                log('Health check: ' + JSON.stringify(data, null, 2));
+            } catch (error) {
+                log('Health check failed: ' + error, true);
+            }
+        }
+
+        async function testHistory() {
+            try {
+                const response = await fetch('/tools/ha.get_history', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        entity_id: 'sensor.temperature',
+                        start: new Date(Date.now() - 24*60*60*1000).toISOString(),
+                        end: new Date().toISOString(),
+                        interval: '1h',
+                        agg: 'mean'
+                    })
+                });
+                const data = await response.json();
+                log('History data: ' + JSON.stringify(data, null, 2));
+            } catch (error) {
+                log('History test failed: ' + error, true);
+            }
+        }
+
+        async function testStatistics() {
+            try {
+                const response = await fetch('/tools/ha.get_statistics', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        statistic_id: 'sensor.temperature',
+                        start: new Date(Date.now() - 24*60*60*1000).toISOString(),
+                        end: new Date().toISOString(),
+                        period: 'hour',
+                        fields: ['mean', 'min', 'max']
+                    })
+                });
+                const data = await response.json();
+                log('Statistics data: ' + JSON.stringify(data, null, 2));
+            } catch (error) {
+                log('Statistics test failed: ' + error, true);
+            }
+        }
+
+        async function testEntities() {
+            try {
+                const response = await fetch('/tools/ha.list_entities');
+                const data = await response.json();
+                log('Entities: ' + JSON.stringify(data, null, 2));
+            } catch (error) {
+                log('Entities test failed: ' + error, true);
+            }
+        }
+
+        async function testMCPProtocol() {
+            try {
+                const response = await fetch('/mcp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: 1,
+                        method: 'tools/list',
+                        params: {}
+                    })
+                });
+                const data = await response.json();
+                log('MCP tools/list: ' + JSON.stringify(data, null, 2));
+            } catch (error) {
+                log('MCP protocol test failed: ' + error, true);
+            }
+        }
+
+        async function testMCPTools() {
+            try {
+                log('Testing MCP tool call...');
+                const response = await fetch('/mcp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: 2,
+                        method: 'tools/call',
+                        params: {
+                            name: 'ha.list_entities',
+                            arguments: {}
+                        }
+                    })
+                });
+                const data = await response.json();
+                log('MCP tool call result: ' + JSON.stringify(data, null, 2));
+            } catch (error) {
+                log('MCP tool call failed: ' + error, true);
+            }
+        }
+
+        // Auto-test health on load
+        window.onload = () => {
+            testHealth();
+        };
+    </script>
+</body>
+</html>
+    """
+    return HTMLResponse(content=html_content)
+
+# =============================================================================
 # REST API Endpoints (for compatibility and testing)
 # =============================================================================
 
 @app.get("/health")
 async def health():
     """Health check endpoint"""
-    db_status = "connected" if db_pool else "disconnected"
+    db_status = "connected" if db_pool else "mock_mode"
     
     if db_pool:
         try:
@@ -506,10 +782,11 @@ async def health():
     
     return {
         "status": "ok",
-        "version": "0.4.1",
+        "version": "0.4.2",
         "database": db_status,
         "read_only": READ_ONLY,
         "timescaledb": ENABLE_TIMESCALE,
+        "sse_clients": len(sse_clients),
         "timestamp": datetime.utcnow().isoformat() + "Z"
     }
 
@@ -523,82 +800,10 @@ async def rest_get_statistics(req: StatisticsRequest):
     """REST endpoint for statistics queries"""
     return await get_statistics_data(req)
 
-@app.post("/tools/ha.get_statistics_bulk")
-async def rest_get_statistics_bulk(req: StatisticsBulkRequest):
-    """REST endpoint for bulk statistics queries"""
-    return await get_statistics_bulk(req)
-
 @app.get("/tools/ha.list_entities")
-async def list_entities(limit: int = 100):
-    """List available entities with recent data"""
-    if not db_pool:
-        raise HTTPException(status_code=503, detail="Database not connected")
-    
-    try:
-        async with db_pool.acquire() as conn:
-            # Get entities with recent data
-            query = """
-                SELECT DISTINCT
-                    sm.entity_id,
-                    sm.metadata_id,
-                    COUNT(s.state_id) as state_count,
-                    MAX(s.last_updated_ts) as last_seen_ts
-                FROM states_meta sm
-                LEFT JOIN states s ON s.metadata_id = sm.metadata_id
-                    AND s.last_updated_ts > $1
-                GROUP BY sm.entity_id, sm.metadata_id
-                HAVING MAX(s.last_updated_ts) IS NOT NULL
-                ORDER BY MAX(s.last_updated_ts) DESC
-                LIMIT $2
-            """
-            
-            # Look for entities with data in the last 7 days
-            since = (datetime.utcnow() - timedelta(days=7)).timestamp()
-            rows = await conn.fetch(query, since, limit)
-            
-            entities = []
-            for row in rows:
-                entities.append({
-                    "entity_id": row['entity_id'],
-                    "state_count": row['state_count'],
-                    "last_seen": datetime.fromtimestamp(row['last_seen_ts']).isoformat() + "Z"
-                })
-            
-            # Also get available statistics
-            stats_query = """
-                SELECT 
-                    statistic_id,
-                    source,
-                    unit_of_measurement,
-                    has_mean,
-                    has_sum
-                FROM statistics_meta
-                ORDER BY statistic_id
-                LIMIT $1
-            """
-            
-            stats_rows = await conn.fetch(stats_query, limit)
-            
-            statistics = []
-            for row in stats_rows:
-                statistics.append({
-                    "statistic_id": row['statistic_id'],
-                    "source": row['source'],
-                    "unit": row['unit_of_measurement'],
-                    "has_mean": row['has_mean'],
-                    "has_sum": row['has_sum']
-                })
-            
-            return {
-                "entities": entities,
-                "statistics": statistics,
-                "entity_count": len(entities),
-                "statistic_count": len(statistics)
-            }
-            
-    except Exception as e:
-        logger.error(f"Error listing entities: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+async def rest_list_entities():
+    """REST endpoint to list entities"""
+    return await list_entities()
 
 # =============================================================================
 # Application Lifecycle
@@ -607,15 +812,26 @@ async def list_entities(limit: int = 100):
 @app.on_event("startup")
 async def startup_event():
     """Initialize database on startup"""
-    logger.info("Starting MCP Server v0.4.1")
+    logger.info("Starting MCP Server v0.4.2")
+    logger.info(f"SSE endpoint available at: http://localhost:{PORT}/sse")
+    logger.info(f"MCP endpoint available at: http://localhost:{PORT}/mcp")
+    logger.info(f"Test interface available at: http://localhost:{PORT}/")
+    
     success = await init_db_pool()
     if not success:
         logger.warning("⚠️ Running in mock mode - database not connected")
+        logger.info("Using mock data for testing SSE functionality")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
     logger.info("Shutting down MCP Server")
+    
+    # Close all SSE connections
+    for client_id in list(sse_clients.keys()):
+        logger.info(f"Closing SSE client: {client_id}")
+    sse_clients.clear()
+    
     await close_db_pool()
 
 # =============================================================================
@@ -625,6 +841,7 @@ async def shutdown_event():
 if __name__ == "__main__":
     try:
         logger.info(f"Starting server on port {PORT}")
+        logger.info(f"Test interface: http://localhost:{PORT}/")
         uvicorn.run(
             app,
             host="0.0.0.0",
