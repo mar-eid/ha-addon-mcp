@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.9] - 2025-08-29
+
+### Added
+- **📡 Full SSE Compliance**: Added Server-Sent Events endpoint (GET /mcp) for MCP protocol
+- **🔄 Real-time Streaming**: Proper SSE implementation with initialization and tools notifications
+- **🔔 Ping System**: Periodic keep-alive pings every 30 seconds for connection stability
+- **⚙️ Dual Protocol Support**: Both SSE (GET /mcp) and JSON-RPC (POST /mcp) endpoints
+- **🌐 Enhanced Headers**: Proper SSE headers with CORS and anti-buffering support
+
+### Fixed
+- **⚠️ SSE Protocol Compliance**: Now fully compliant with MCP Server-Sent Events specification
+- **🔗 Home Assistant Integration**: Should resolve "Failed to connect" errors with MCP Client
+- **📋 Connection Stability**: Proper SSE stream management with graceful error handling
+- **🔍 Debug Logging**: Enhanced SSE connection and streaming debug information
+
+### Technical Details
+- **GET /mcp**: SSE endpoint for real-time MCP protocol communication
+- **POST /mcp**: JSON-RPC endpoint for tool calls and commands
+- **Auto-discovery**: SSE stream sends server info and available tools on connection
+- **Error Handling**: Graceful SSE disconnection and error event broadcasting
+- **Performance**: Optimized streaming with proper Content-Type and cache headers
+
+### SSE Protocol Implementation
+- **notifications/initialized**: Server capabilities and protocol version
+- **notifications/tools/list**: Available tools broadcast to connected clients
+- **notifications/ping**: Periodic heartbeat with timestamp and sequence
+- **notifications/error**: Error events with graceful connection termination
+
+### Usage
+Home Assistant MCP Client can now connect to:
+```
+SSE URL: http://addon_mcp_server:8099/mcp (GET)
+JSON-RPC URL: http://addon_mcp_server:8099/mcp (POST)
+```
+
 ## [0.3.8] - 2025-08-29
 
 ### Documentation

@@ -41,7 +41,7 @@ if log_level == "DEBUG":
     logging.getLogger("psycopg2").setLevel(logging.DEBUG)
     logger.debug("🔍 Debug logging enabled - full stack traces will be shown")
 
-app = FastAPI(title="Home Assistant MCP Server", version="0.3.8")
+app = FastAPI(title="Home Assistant MCP Server", version="0.3.9")
 
 # Configuration from environment
 READ_ONLY = os.getenv("MCP_READ_ONLY", "true").lower() == "true"
@@ -320,7 +320,7 @@ def handle_addon_health(params: Dict[str, Any]) -> MCPToolResult:
         
         result = {
             "addon_status": "running",
-            "version": "0.3.8",
+            "version": "0.3.9",
             "database_connected": db_connected,
             "database_config": {
                 "host": DB_CONFIG["host"],
@@ -347,6 +347,106 @@ def handle_addon_health(params: Dict[str, Any]) -> MCPToolResult:
             content=[MCPToolContent(text=f"Error getting health status: {str(e)}")],
             isError=True
         )
+
+# SSE Endpoint for MCP Protocol Compliance
+@app.get("/mcp")
+async def mcp_sse_endpoint(request: Request):
+    """
+    SSE endpoint for MCP protocol - required by Home Assistant MCP Client
+    Provides Server-Sent Events transport for Model Context Protocol
+    """
+    client_info = f"{request.client.host}:{request.client.port}" if request.client else "unknown"
+    logger.info(f"SSE connection established with {client_info}")
+    logger.debug(f"SSE request headers: {dict(request.headers)}")
+    
+    async def sse_stream():
+        try:
+            # Send server initialization event
+            init_event = {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "serverInfo": {
+                        "name": "Home Assistant MCP Server",
+                        "version": "0.3.9"
+                    },
+                    "capabilities": {
+                        "tools": {}
+                    }
+                }
+            }
+            
+            yield f"data: {json.dumps(init_event)}\n\n"
+            logger.debug(f"Sent SSE initialization to {client_info}")
+            
+            # Send tools list notification
+            tools_event = {
+                "jsonrpc": "2.0", 
+                "method": "notifications/tools/list",
+                "params": {
+                    "tools": [
+                        {
+                            "name": tool_info["name"],
+                            "description": tool_info["description"],
+                            "inputSchema": tool_info["inputSchema"]
+                        }
+                        for tool_info in MCP_TOOLS.values()
+                    ]
+                }
+            }
+            
+            yield f"data: {json.dumps(tools_event)}\n\n"
+            logger.debug(f"Sent SSE tools list to {client_info}")
+            
+            # Keep connection alive with periodic pings
+            ping_count = 0
+            while True:
+                await asyncio.sleep(30)  # Ping every 30 seconds
+                ping_count += 1
+                
+                ping_event = {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/ping", 
+                    "params": {
+                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "sequence": ping_count,
+                        "server_status": "running"
+                    }
+                }
+                
+                yield f"data: {json.dumps(ping_event)}\n\n"
+                logger.debug(f"Sent SSE ping #{ping_count} to {client_info}")
+                
+        except asyncio.CancelledError:
+            logger.info(f"SSE client {client_info} disconnected gracefully")
+        except Exception as e:
+            logger.error(f"SSE stream error for {client_info}: {e}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"SSE stream error traceback:\n{traceback.format_exc()}")
+            # Send error event before closing
+            error_event = {
+                "jsonrpc": "2.0",
+                "method": "notifications/error",
+                "params": {
+                    "error": str(e),
+                    "timestamp": datetime.utcnow().isoformat() + "Z"
+                }
+            }
+            yield f"data: {json.dumps(error_event)}\n\n"
+    
+    return StreamingResponse(
+        sse_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive", 
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Accept, Authorization, Content-Type",
+            "X-Accel-Buffering": "no"  # Disable proxy buffering for real-time streaming
+        }
+    )
 
 # MCP Tool Registry
 MCP_TOOLS = {
