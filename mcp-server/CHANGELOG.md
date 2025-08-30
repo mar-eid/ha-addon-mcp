@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] - 2025-08-29
+
+### Added
+- **🔍 Enhanced Debug Logging**: Comprehensive debug logging when `log_level: debug` is set
+- **📊 Full Stack Traces**: Complete error tracebacks in debug mode for all exceptions
+- **🔧 Request/Response Logging**: Detailed logging of MCP protocol messages and timing
+- **📋 Database Query Debugging**: SQL query logging, timing, and result analysis
+- **🌐 Client Connection Info**: Log client IP, headers, and request details
+- **🚀 Enhanced Startup Logging**: Environment variables, versions, and configuration details
+
+### Enhanced
+- **Database Connection**: Detailed connection timing and database metadata logging
+- **Tool Execution**: Per-tool execution timing and parameter logging
+- **Error Handling**: Full stack traces for all error conditions when in debug mode
+- **Query Analysis**: Entity existence checks and data availability diagnostics
+- **MCP Protocol**: Request/response debugging with full JSON message logging
+
+### Debug Features
+- **Query Performance**: Database query execution timing and optimization hints
+- **Environment Inspection**: All MCP_* and PG* environment variables logged (passwords masked)
+- **Tool Registry**: Available tools and their schemas logged at startup
+- **Connection Diagnostics**: Database version, user, available tables logged
+- **Request Tracking**: Full request lifecycle from client connection to response
+
+### Usage
+Set `log_level: debug` in add-on configuration to enable comprehensive debugging:
+```yaml
+log_level: debug
+```
+
+This will provide:
+- Full stack traces for all errors
+- Database query logging and timing
+- MCP protocol message debugging  
+- Tool execution performance metrics
+- Environment and configuration inspection
+- Client connection and request details
+
 ## [0.3.5] - 2025-08-29
 
 ### Fixed

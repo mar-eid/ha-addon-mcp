@@ -1,14 +1,14 @@
 name: MCP Server
-version: "0.3.5"
+version: "0.3.6"
 slug: mcp_server
 description: Model Context Protocol server for querying Home Assistant historical data
 url: https://github.com/mar-eid/ha-addon-mcp
 arch:
   - aarch64
   - amd64
-startup: services
+startup: application
 boot: auto
-init: true
+init: false
 stage: experimental
 hassio_api: true
 hassio_role: default
@@ -19,7 +19,8 @@ panel_icon: mdi:database-search
 panel_title: MCP Server
 homeassistant: 2024.1.0
 
-image: ghcr.io/mar-eid/ha-addon-mcp-{arch}
+# Force local build instead of registry
+# image: ghcr.io/mar-eid/ha-addon-mcp-{arch}
 
 ports:
   8099/tcp: null
