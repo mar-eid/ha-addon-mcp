@@ -1,2 +1,0 @@
-# Requirements for running test scripts
-aiohttp==3.9.1

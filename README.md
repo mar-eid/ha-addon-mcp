@@ -1,16 +1,16 @@
 # 🛠️ Home Assistant MCP Server Add-on
 
 [![Build & Push](https://github.com/mar-eid/ha-addon-mcp/actions/workflows/build.yml/badge.svg)](https://github.com/mar-eid/ha-addon-mcp/actions/workflows/build.yml)
-[![Version](https://img.shields.io/badge/version-6.1-blue)](https://github.com/mar-eid/ha-addon-mcp/releases)
+[![Version](https://img.shields.io/badge/version-6.2-blue)](https://github.com/mar-eid/ha-addon-mcp/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 A [Home Assistant](https://www.home-assistant.io/) add-on that runs a **Model Context Protocol (MCP) server** for querying historical data from PostgreSQL/TimescaleDB. This enables AI assistants (like OpenAI through Home Assistant Assist) to access and analyze your home automation data.
 
-🎉 **Version 6.1 - MAJOR MILESTONE**: First fully functional Home Assistant MCP Server with complete HA MCP Client integration!
+🎉 **Version 6.2 - ENHANCED COMPATIBILITY**: Improved Home Assistant MCP Client compatibility with better SSE formatting and enhanced debugging.
 
 ---
 
-## ✨ What's Working in v6.1
+## ✨ What's Working in v6.2
 
 - ✅ **Home Assistant MCP Client**: Connects via `http://homeassistant.local:8099/sse`
 - ✅ **External MCP Clients**: Connect via `http://homeassistant.local:8099/mcp` 
@@ -23,13 +23,22 @@ A [Home Assistant](https://www.home-assistant.io/) add-on that runs a **Model Co
 
 ---
 
-## 📈 Major Version Jump (0.5.x → 6.1)
+## 📈 Latest Updates (6.1 → 6.2)
+
+### 🔧 Enhanced v6.2 Features
+- **Better SSE Formatting**: Fixed event stream formatting for improved HA MCP Client compatibility
+- **Enhanced Logging**: More detailed tool execution logging and debugging information
+- **Improved Mock Data**: More realistic Home Assistant entity examples for testing
+- **Better Error Handling**: Enhanced error responses and debugging capabilities
+- **Test Endpoint**: Added `/test-tool` endpoint for easier development and testing
+
+## 📈 Major Version Jump (0.5.x → 6.1+)
 
 This represents the transition from **experimental** to **stable working version**:
 - **Before v6.1**: Server crashed immediately with stdio transport issues
 - **After v6.1**: Stable server with working HA integration and external client support
 
-### 🎯 Technical Achievements v6.1
+### 🎯 Technical Achievements v6.1+
 - **Official MCP SDK**: Using `mcp==1.1.2` for guaranteed protocol compliance
 - **FastAPI + SSE**: Hybrid architecture combining web server with MCP SDK
 - **Async Database**: Full asyncpg implementation with connection pooling
@@ -257,6 +266,13 @@ curl -N -H "Accept: text/event-stream" http://localhost:8099/mcp
 ---
 
 ## 📜 Changelog
+
+### v6.2 (2025-08-31) - 🔧 Enhanced Compatibility 
+- **🔧 Better SSE Formatting**: Fixed event stream formatting for improved HA MCP Client compatibility
+- **📝 Enhanced Logging**: More detailed tool execution logging and debugging information  
+- **📊 Improved Mock Data**: More realistic Home Assistant entity examples for testing
+- **🚫 Better Error Handling**: Enhanced error responses and debugging capabilities
+- **🧪 Test Endpoint**: Added `/test-tool` endpoint for easier development and testing
 
 ### v6.1 (2025-08-31) - 🎉 Major Milestone
 - **🎉 Complete Working MCP Server**: First fully functional version

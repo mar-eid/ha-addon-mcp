@@ -1,7 +1,7 @@
 """
 Home Assistant MCP Server
 Model Context Protocol server for Home Assistant historical data
-Version: 6.1
+Version: 6.2
 """
 import os
 import asyncio
@@ -53,7 +53,7 @@ logger.info(f"📅 Max query days: {MAX_QUERY_DAYS}")
 db_pool: Optional[Pool] = None
 
 # FastAPI app
-app = FastAPI(title="Home Assistant MCP Server", version="6.1")
+app = FastAPI(title="Home Assistant MCP Server", version="6.2")
 
 # Global MCP server instance
 mcp_server_instance = None
@@ -176,6 +176,8 @@ class HAMCPServer:
         async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[types.TextContent]:
             """Handle tool calls"""
             try:
+                logger.info(f"🔧 Tool called: {name} with args: {arguments}")
+                
                 if name == "get_history":
                     result = await self.get_history(**arguments)
                 elif name == "get_statistics":
@@ -187,16 +189,18 @@ class HAMCPServer:
                 else:
                     raise ValueError(f"Unknown tool: {name}")
                 
+                logger.info(f"✅ Tool {name} completed successfully")
+                
                 return [types.TextContent(
                     type="text",
                     text=json.dumps(result, indent=2)
                 )]
             
             except Exception as e:
-                logger.error(f"Error executing tool {name}: {e}")
+                logger.error(f"❌ Error executing tool {name}: {e}")
                 return [types.TextContent(
                     type="text", 
-                    text=json.dumps({"error": str(e)}, indent=2)
+                    text=json.dumps({"error": str(e), "tool": name}, indent=2)
                 )]
     
     async def get_history(
@@ -208,7 +212,7 @@ class HAMCPServer:
         aggregation: str = "mean"
     ) -> Dict[str, Any]:
         """Query historical state data"""
-        logger.info(f"get_history: {entity_id} from {start} to {end}")
+        logger.info(f"📊 get_history: {entity_id} from {start} to {end} (interval: {interval}, agg: {aggregation})")
         
         # Validate date range
         try:
@@ -222,13 +226,14 @@ class HAMCPServer:
         
         # Use mock data if no database connection
         if not db_pool:
-            logger.warning("Using mock data - no database connection")
+            logger.warning("🎭 Using mock data - no database connection")
             return {
                 "entity_id": entity_id,
                 "series": self.generate_mock_series(start, end, interval),
                 "interval": interval,
                 "aggregation": aggregation,
-                "mock_data": True
+                "mock_data": True,
+                "message": "Database not available - using mock data for demonstration"
             }
         
         try:
@@ -243,8 +248,9 @@ class HAMCPServer:
                 if not entity_meta:
                     return {
                         "entity_id": entity_id,
-                        "error": "Entity not found",
-                        "series": []
+                        "error": f"Entity '{entity_id}' not found in database",
+                        "series": [],
+                        "suggestion": "Use list_entities tool to see available entities"
                     }
                 
                 # Handle raw data requests
@@ -348,14 +354,18 @@ class HAMCPServer:
                     "count": len(series),
                     "interval": interval,
                     "aggregation": aggregation,
-                    "query_time": datetime.utcnow().isoformat() + "Z"
+                    "query_time": datetime.utcnow().isoformat() + "Z",
+                    "time_range": {
+                        "start": start,
+                        "end": end
+                    }
                 }
                 
         except Exception as e:
-            logger.error(f"Database error in get_history: {e}")
+            logger.error(f"💥 Database error in get_history: {e}")
             return {
                 "entity_id": entity_id,
-                "error": str(e),
+                "error": f"Database query failed: {str(e)}",
                 "series": []
             }
     
@@ -367,7 +377,7 @@ class HAMCPServer:
         period: str = "hour"
     ) -> Dict[str, Any]:
         """Query aggregated statistics data"""
-        logger.info(f"get_statistics: {statistic_id} from {start} to {end}")
+        logger.info(f"📈 get_statistics: {statistic_id} from {start} to {end} (period: {period})")
         
         try:
             start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
@@ -392,7 +402,8 @@ class HAMCPServer:
                 "statistic_id": statistic_id,
                 "series": series,
                 "period": period,
-                "mock_data": True
+                "mock_data": True,
+                "message": "Database not available - using mock data for demonstration"
             }
         
         try:
@@ -407,8 +418,9 @@ class HAMCPServer:
                 if not meta:
                     return {
                         "statistic_id": statistic_id,
-                        "error": "Statistic not found",
-                        "series": []
+                        "error": f"Statistic '{statistic_id}' not found in database",
+                        "series": [],
+                        "suggestion": "Use list_entities tool to see available statistics"
                     }
                 
                 # Select appropriate table
@@ -453,20 +465,24 @@ class HAMCPServer:
                     "series": series,
                     "count": len(series),
                     "period": period,
-                    "query_time": datetime.utcnow().isoformat() + "Z"
+                    "query_time": datetime.utcnow().isoformat() + "Z",
+                    "time_range": {
+                        "start": start,
+                        "end": end
+                    }
                 }
                 
         except Exception as e:
-            logger.error(f"Database error in get_statistics: {e}")
+            logger.error(f"💥 Database error in get_statistics: {e}")
             return {
                 "statistic_id": statistic_id,
-                "error": str(e),
+                "error": f"Database query failed: {str(e)}",
                 "series": []
             }
     
     async def list_entities(self, limit: int = 100, entity_type: Optional[str] = None) -> Dict[str, Any]:
         """List available entities and statistics"""
-        logger.info(f"list_entities: limit={limit}, type={entity_type}")
+        logger.info(f"📝 list_entities: limit={limit}, type={entity_type}")
         
         if not db_pool:
             # Return mock entities
@@ -474,21 +490,25 @@ class HAMCPServer:
                 {"entity_id": "sensor.temperature", "last_seen": datetime.utcnow().isoformat() + "Z"},
                 {"entity_id": "sensor.humidity", "last_seen": datetime.utcnow().isoformat() + "Z"},
                 {"entity_id": "sensor.pressure", "last_seen": datetime.utcnow().isoformat() + "Z"},
+                {"entity_id": "sensor.power_consumption", "last_seen": datetime.utcnow().isoformat() + "Z"},
                 {"entity_id": "binary_sensor.door", "last_seen": datetime.utcnow().isoformat() + "Z"}
             ]
             
             mock_statistics = [
                 {"statistic_id": "sensor.temperature", "unit": "°C", "source": "recorder"},
-                {"statistic_id": "sensor.humidity", "unit": "%", "source": "recorder"}
+                {"statistic_id": "sensor.humidity", "unit": "%", "source": "recorder"},
+                {"statistic_id": "sensor.power_consumption", "unit": "kWh", "source": "recorder"}
             ]
             
             if entity_type:
                 mock_entities = [e for e in mock_entities if e["entity_id"].startswith(entity_type + ".")]
+                mock_statistics = [s for s in mock_statistics if s["statistic_id"].startswith(entity_type + ".")]
             
             return {
                 "entities": mock_entities[:limit],
                 "statistics": mock_statistics[:limit],
-                "mock_data": True
+                "mock_data": True,
+                "message": "Database not available - showing sample entities for demonstration"
             }
         
         try:
@@ -561,15 +581,19 @@ class HAMCPServer:
                     "statistics": statistics,
                     "entity_count": len(entities),
                     "statistic_count": len(statistics),
-                    "query_time": datetime.utcnow().isoformat() + "Z"
+                    "query_time": datetime.utcnow().isoformat() + "Z",
+                    "filter": {
+                        "entity_type": entity_type,
+                        "limit": limit
+                    }
                 }
                 
         except Exception as e:
-            logger.error(f"Database error in list_entities: {e}")
+            logger.error(f"💥 Database error in list_entities: {e}")
             return {
                 "entities": [],
                 "statistics": [],
-                "error": str(e)
+                "error": f"Database query failed: {str(e)}"
             }
     
     async def health_check(self) -> Dict[str, Any]:
@@ -608,7 +632,7 @@ class HAMCPServer:
         
         return {
             "status": "ok",
-            "version": "6.1",
+            "version": "6.2",
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "database": {
                 "status": db_status,
@@ -751,7 +775,7 @@ async def root():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Home Assistant MCP Server v6.1</title>
+        <title>Home Assistant MCP Server v6.2</title>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
@@ -770,16 +794,16 @@ async def root():
         <div class="header">
             <h1>🛠️ Home Assistant MCP Server</h1>
             <p>Model Context Protocol server for historical data access</p>
-            <p><strong>Version:</strong> 6.1 | <strong>Transport:</strong> SSE (Server-Sent Events)</p>
+            <p><strong>Version:</strong> 6.2 | <strong>Transport:</strong> SSE (Server-Sent Events)</p>
         </div>
 
         <div class="section">
             <h2>🔌 Integration URLs</h2>
             <p><strong>For Home Assistant MCP Client Integration:</strong></p>
             <ul>
-                <li><strong>Primary:</strong> <code>http://homeassistant.local:8099/sse</code></li>
-                <li><strong>Alternative:</strong> <code>http://localhost:8099/sse</code></li>
-                <li><strong>Internal:</strong> <code>http://addon_mcp_server:8099/sse</code></li>
+                <li><strong>Primary:</strong> <code>http://localhost:8099/sse</code></li>
+                <li><strong>Alternative:</strong> <code>http://addon_mcp_server:8099/sse</code></li>
+                <li><strong>Ingress:</strong> <code>http://homeassistant.local:8099/sse</code></li>
             </ul>
             <p><em>Use the SSE endpoint URL in MCP Client configuration</em></p>
         </div>
@@ -820,7 +844,7 @@ async def root():
             <p><strong>Home Assistant MCP Client:</strong></p>
             <ul>
                 <li>Install the <strong>Model Context Protocol</strong> integration</li>
-                <li>Configure SSE endpoint: <code>http://localhost:8099/mcp</code></li>
+                <li>Configure SSE endpoint: <code>http://localhost:8099/sse</code></li>
                 <li>Tools automatically available to AI assistants</li>
             </ul>
         </div>
@@ -896,11 +920,11 @@ async def sse_endpoint(request: Request):
                     },
                     "serverInfo": {
                         "name": "ha-mcp-server",
-                        "version": "6.1"
+                        "version": "6.2"
                     }
                 }
             }
-            yield f"data: {json.dumps(init_event)}\\n\\n"
+            yield f"data: {json.dumps(init_event)}\n\n"
             logger.info("🔄 Sent initialization event to HA MCP Client")
             
             # Send tools list
@@ -919,7 +943,7 @@ async def sse_endpoint(request: Request):
                         ]
                     }
                 }
-                yield f"data: {json.dumps(tools_event)}\\n\\n"
+                yield f"data: {json.dumps(tools_event)}\n\n"
                 logger.info(f"🛠️ Sent {len(mcp_server_instance.tools)} tools to HA MCP Client")
             
             # Keep connection alive with pings
@@ -941,7 +965,7 @@ async def sse_endpoint(request: Request):
                         "timestamp": datetime.utcnow().isoformat() + "Z"
                     }
                 }
-                yield f"data: {json.dumps(ping_event)}\\n\\n"
+                yield f"data: {json.dumps(ping_event)}\n\n"
                 logger.debug(f"🏓 Ping {sequence} sent to HA MCP Client {client_id}")
                 
         except Exception as e:
@@ -963,168 +987,33 @@ async def sse_endpoint(request: Request):
         }
     )
 
-@app.options("/mcp")
-async def mcp_options():
-    """Handle CORS preflight requests"""
-    return Response(
-        status_code=200,
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, OPTIONS",
-            "Access-Control-Allow-Headers": "Cache-Control,Content-Type,Authorization",
-            "Access-Control-Max-Age": "86400"
-        }
-    )
-
-@app.get("/mcp")
-async def mcp_sse_endpoint(request: Request):
-    """SSE endpoint for MCP protocol"""
-    client_id = str(uuid.uuid4())
-    connected_clients.add(client_id)
-    
-    logger.info(f"🔗 New SSE client connected: {client_id}")
-    logger.info(f"🌍 Client headers: {dict(request.headers)}")
-    
-    async def generate_mcp_events():
-        try:
-            # Send initialization event
-            init_event = {
-                "jsonrpc": "2.0",
-                "method": "notifications/initialized",
-                "params": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {
-                        "tools": {}
-                    },
-                    "serverInfo": {
-                        "name": "ha-mcp-server",
-                        "version": "6.1"
-                    }
-                }
-            }
-            yield f"data: {json.dumps(init_event)}\\n\\n"
-            logger.info("🔄 Sent initialization event")
-            
-            # Send tools list
-            if mcp_server_instance:
-                tools_event = {
-                    "jsonrpc": "2.0", 
-                    "method": "tools/list",
-                    "result": {
-                        "tools": [
-                            {
-                                "name": tool.name,
-                                "description": tool.description,
-                                "inputSchema": tool.inputSchema
-                            }
-                            for tool in mcp_server_instance.tools
-                        ]
-                    }
-                }
-                yield f"data: {json.dumps(tools_event)}\\n\\n"
-                logger.info(f"🛠️ Sent {len(mcp_server_instance.tools)} tools")
-            
-            # Keep connection alive with pings
-            sequence = 0
-            while True:
-                await asyncio.sleep(30)  # Ping every 30 seconds
-                
-                # Check if client disconnected
-                if await request.is_disconnected():
-                    logger.info(f"🔌 SSE client disconnected: {client_id}")
-                    break
-                    
-                sequence += 1
-                ping_event = {
-                    "jsonrpc": "2.0",
-                    "method": "ping", 
-                    "params": {
-                        "sequence": sequence,
-                        "timestamp": datetime.utcnow().isoformat() + "Z"
-                    }
-                }
-                yield f"data: {json.dumps(ping_event)}\\n\\n"
-                logger.debug(f"🏓 Ping {sequence} sent to {client_id}")
-                
-        except Exception as e:
-            logger.error(f"SSE error for client {client_id}: {e}")
-        finally:
-            connected_clients.discard(client_id)
-            logger.info(f"🔌 SSE client removed: {client_id}")
-    
-    return StreamingResponse(
-        generate_mcp_events(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Cache-Control,Content-Type,Authorization",
-            "Access-Control-Allow-Methods": "GET,OPTIONS",
-            "X-Accel-Buffering": "no"  # Disable nginx buffering
-        }
-    )
-
-@app.post("/mcp/call")
-async def mcp_call_tool(request: dict):
-    """Handle MCP tool calls via HTTP POST"""
+# Add a simple test endpoint that simulates tool calls
+@app.post("/test-tool")
+async def test_tool_call(request_data: dict):
+    """Test endpoint to simulate MCP tool calls"""
     try:
-        if not mcp_server_instance:
-            raise HTTPException(status_code=500, detail="MCP server not initialized")
+        tool_name = request_data.get("tool", "health_check")
+        arguments = request_data.get("arguments", {})
         
-        method = request.get("method")
-        params = request.get("params", {})
-        
-        if method == "tools/call":
-            tool_name = params.get("name")
-            arguments = params.get("arguments", {})
+        if mcp_server_instance:
+            if tool_name == "get_history":
+                result = await mcp_server_instance.get_history(**arguments)
+            elif tool_name == "get_statistics":
+                result = await mcp_server_instance.get_statistics(**arguments)
+            elif tool_name == "list_entities":
+                result = await mcp_server_instance.list_entities(**arguments)
+            elif tool_name == "health_check":
+                result = await mcp_server_instance.health_check()
+            else:
+                result = {"error": f"Unknown tool: {tool_name}"}
             
-            # Call the tool
-            handler = mcp_server_instance.server._handlers.get("call_tool")
-            if handler:
-                result = await handler(tool_name, arguments)
-                
-                return {
-                    "jsonrpc": "2.0",
-                    "id": request.get("id"),
-                    "result": {"content": result}
-                }
-            else:
-                raise HTTPException(status_code=404, detail="Tool handler not found")
-                
-        elif method == "tools/list":
-            handler = mcp_server_instance.server._handlers.get("list_tools") 
-            if handler:
-                tools = await handler()
-                return {
-                    "jsonrpc": "2.0",
-                    "id": request.get("id"),
-                    "result": {
-                        "tools": [
-                            {
-                                "name": tool.name,
-                                "description": tool.description,
-                                "inputSchema": tool.inputSchema
-                            }
-                            for tool in tools
-                        ]
-                    }
-                }
-            else:
-                raise HTTPException(status_code=404, detail="Tools handler not found")
+            return {"success": True, "result": result}
         else:
-            raise HTTPException(status_code=400, detail=f"Unknown method: {method}")
-            
+            return {"success": False, "error": "MCP server not initialized"}
+    
     except Exception as e:
-        logger.error(f"MCP call error: {e}")
-        return {
-            "jsonrpc": "2.0", 
-            "id": request.get("id"),
-            "error": {
-                "code": -32603,
-                "message": str(e)
-            }
-        }
+        logger.error(f"Test tool error: {e}")
+        return {"success": False, "error": str(e)}
 
 # =============================================================================
 # Main Entry Point
@@ -1135,7 +1024,7 @@ async def startup_event():
     global mcp_server_instance
     
     logger.info("🚀 Starting Home Assistant MCP Server")
-    logger.info("📦 Version: 6.1")
+    logger.info("📦 Version: 6.2")
     logger.info("🔧 Using SSE transport with official MCP SDK")
     
     # Initialize database connection
@@ -1150,7 +1039,7 @@ async def startup_event():
     # Create MCP server instance
     mcp_server_instance = HAMCPServer()
     logger.info("🌐 MCP server initialized with SSE transport")
-    logger.info(f"🔗 SSE endpoint: http://localhost:{MCP_PORT}/mcp")
+    logger.info(f"🔗 SSE endpoint: http://localhost:{MCP_PORT}/sse")
 
 async def shutdown_event():
     """Cleanup on shutdown"""
@@ -1164,11 +1053,12 @@ app.add_event_handler("shutdown", shutdown_event)
 
 if __name__ == "__main__":
     logger.info(f"🌐 Starting FastAPI server on port {MCP_PORT}")
-    logger.info(f"🔗 Internal URLs to try in MCP Client:")
-    logger.info(f"   - http://localhost:8099/mcp")
-    logger.info(f"   - http://addon_mcp_server:8099/mcp")
-    logger.info(f"   - http://a0d7b954-mcp-server:8099/mcp")
-    logger.info(f"   - http://mcp-server:8099/mcp")
+    logger.info(f"🔗 Primary SSE endpoint for HA MCP Client: http://localhost:{MCP_PORT}/sse")
+    logger.info(f"🔗 Alternative URLs to try:")
+    logger.info(f"   - http://localhost:8099/sse")
+    logger.info(f"   - http://addon_mcp_server:8099/sse")
+    logger.info(f"   - http://a0d7b954-mcp-server:8099/sse")
+    logger.info(f"   - http://homeassistant.local:8099/sse")
     uvicorn.run(
         app, 
         host="0.0.0.0", 

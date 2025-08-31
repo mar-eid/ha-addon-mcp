@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.2] - 2025-08-31
+
+### 🔧 Enhanced HA MCP Client Compatibility
+
+### Fixed
+- **SSE Event Format**: Fixed double newline characters in SSE data events (`\n\n` -> `\n\n`)
+- **Tool Logging**: Enhanced tool execution logging with better success/error tracking
+- **Mock Data**: Improved mock data generation with more realistic Home Assistant entity examples
+- **Error Responses**: Better error formatting in tool responses for debugging
+
+### Enhanced
+- **Logging**: More detailed logging for tool calls and MCP client interactions
+- **Mock Entities**: Added realistic sensor examples (temperature, humidity, power_consumption)
+- **Documentation**: Updated web interface with clearer integration instructions
+- **Test Endpoint**: Added `/test-tool` endpoint for easier debugging
+
+### Technical Details
+- Fixed SSE stream formatting that could cause parsing issues with HA MCP Client
+- Enhanced tool execution tracking with success/failure logging
+- Added detailed request/response logging for better debugging
+- Improved mock data to be more representative of real Home Assistant entities
+
+### Compatibility
+- ✅ **Home Assistant MCP Client**: Improved compatibility with proper SSE formatting
+- ✅ **External MCP Clients**: Maintains compatibility with all MCP clients
+- ✅ **All Tools**: get_history, get_statistics, list_entities, health_check all enhanced
+
 ## [6.1] - 2025-08-31
 
 ### 🎉 Major Milestone - Complete Working MCP Server
