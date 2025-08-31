@@ -1,7 +1,7 @@
 """
 Home Assistant MCP Server
 Model Context Protocol server for Home Assistant historical data
-Version: 6.3
+Version: 6.4
 """
 import os
 import asyncio
@@ -632,7 +632,7 @@ class HAMCPServer:
         
         return {
             "status": "ok",
-            "version": "6.3",
+            "version": "6.4",
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "database": {
                 "status": db_status,
@@ -775,7 +775,7 @@ async def root():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Home Assistant MCP Server v6.3</title>
+        <title>Home Assistant MCP Server v6.4</title>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
@@ -794,7 +794,7 @@ async def root():
         <div class="header">
             <h1>🛠️ Home Assistant MCP Server</h1>
             <p>Model Context Protocol server for historical data access</p>
-            <p><strong>Version:</strong> 6.3 | <strong>Transport:</strong> SSE (Server-Sent Events)</p>
+            <p><strong>Version:</strong> 6.4 | <strong>Transport:</strong> SSE (Server-Sent Events)</p>
         </div>
 
         <div class="section">
@@ -891,7 +891,7 @@ async def mcp_test_endpoint():
     return {
         "status": "ok",
         "server": "ha-mcp-server",
-        "version": "6.3",
+        "version": "6.4",
         "endpoints": {
             "sse": "/sse",
             "mcp": "/mcp",
@@ -951,7 +951,7 @@ async def sse_endpoint(request: Request):
                     },
                     "serverInfo": {
                         "name": "ha-mcp-server",
-                        "version": "6.3"
+                        "version": "6.4"
                     }
                 }
             }
@@ -1022,7 +1022,10 @@ async def sse_endpoint(request: Request):
             "Access-Control-Allow-Methods": "GET,OPTIONS",
             "X-Accel-Buffering": "no",  # Disable nginx buffering
             "Pragma": "no-cache",
-            "Expires": "0"
+            "Expires": "0",
+            "Strict-Transport-Security": "max-age=0",  # Disable HSTS
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY"
         }
     )
 
@@ -1063,7 +1066,7 @@ async def startup_event():
     global mcp_server_instance
     
     logger.info("🚀 Starting Home Assistant MCP Server")
-    logger.info("📦 Version: 6.3")
+    logger.info("📦 Version: 6.4")
     logger.info("🔧 Using SSE transport with official MCP SDK")
     
     # Initialize database connection
@@ -1102,10 +1105,19 @@ if __name__ == "__main__":
     logger.info(f"⚠️  IMPORTANT: Use HTTP (not HTTPS) URLs in MCP Client configuration")
     logger.info(f"🔒 SSL/TLS is not required for local Home Assistant add-ons")
     logger.info(f"🧪 Test connectivity: http://localhost:{MCP_PORT}/mcp-test")
+    logger.info(f"🐛 Known Issue: HA Core MCP integration has SSL blocking calls (not server issue)")
     logger.info(f"")
-    uvicorn.run(
-        app, 
-        host="0.0.0.0", 
+    
+    # Configure uvicorn to be HTTP-only
+    uvicorn_config = uvicorn.Config(
+        app=app,
+        host="0.0.0.0",
         port=MCP_PORT,
-        log_level="info" if os.getenv("LOG_LEVEL", "INFO").upper() != "DEBUG" else "debug"
+        log_level="info" if os.getenv("LOG_LEVEL", "INFO").upper() != "DEBUG" else "debug",
+        access_log=True,
+        server_header=False,  # Don't advertise server type
+        date_header=False     # Reduce header overhead
     )
+    
+    server = uvicorn.Server(uvicorn_config)
+    server.run()

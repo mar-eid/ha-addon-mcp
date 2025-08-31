@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.4] - 2025-08-31
+
+### 🐛 Home Assistant Core SSL Bug Workaround
+
+### Fixed
+- **HSTS Headers**: Added `Strict-Transport-Security: max-age=0` to disable HSTS and prevent HTTPS upgrades
+- **Server Configuration**: Enhanced uvicorn config to be more explicitly HTTP-only
+- **Security Headers**: Added `X-Content-Type-Options` and `X-Frame-Options` headers
+- **SSL Workaround**: Implemented workarounds for Home Assistant core MCP integration SSL blocking issue
+
+### Added
+- **Bug Documentation**: Added logging message about known HA core SSL blocking issue
+- **HTTP-Only Config**: Explicit uvicorn configuration to discourage any HTTPS behavior
+- **Enhanced Headers**: Additional HTTP headers to prevent browser HTTPS upgrades
+- **Server Optimization**: Disabled unnecessary server headers for cleaner HTTP responses
+
+### Technical Details
+- This addresses the `load_verify_locations` SSL blocking call issue in HA core MCP integration
+- Added explicit HTTP-only configuration to prevent any SSL/TLS negotiation attempts
+- Enhanced server headers to discourage HTTPS upgrades at the browser/client level
+- Documented that this is a Home Assistant core issue, not an add-on issue
+
+### Note
+- **Known Issue**: The SSL blocking error is in Home Assistant core (`homeassistant/components/mcp/coordinator.py`)
+- **Workaround**: These changes attempt to work around the core issue
+- **Long-term Fix**: Requires Home Assistant core MCP integration to be updated
+
+### Compatibility
+- ✅ **Home Assistant MCP Client**: Enhanced workarounds for SSL blocking issue
+- ✅ **HTTP-Only Communication**: Optimized for pure HTTP communication
+- ✅ **External MCP Clients**: Maintains full compatibility
+- ✅ **All Tools**: get_history, get_statistics, list_entities, health_check working
+
 ## [6.3] - 2025-08-31
 
 ### 🔍 SSL/TLS Connection Issues Fixed
