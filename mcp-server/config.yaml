@@ -1,5 +1,5 @@
 name: MCP Server
-version: "0.5.2"
+version: "0.5.3"
 slug: mcp_server
 description: Model Context Protocol server for querying Home Assistant historical data
 url: https://github.com/mar-eid/ha-addon-mcp
@@ -28,8 +28,9 @@ ports:
 map:
   - config:rw
 
-services:
-  - postgresql:want
+# Remove invalid postgresql service dependency
+# services:
+#   - postgresql:want
 
 options:
   pg_host: a0d7b954-postgresql

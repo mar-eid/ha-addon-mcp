@@ -1,7 +1,7 @@
 """
 Home Assistant MCP Server
 Model Context Protocol server for Home Assistant historical data
-Version: 0.2.7
+Version: 0.5.3
 """
 import os
 import asyncio
@@ -588,7 +588,7 @@ class HAMCPServer:
         
         return {
             "status": "ok",
-            "version": "0.2.7",
+            "version": "0.5.3",
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "database": {
                 "status": db_status,
@@ -725,7 +725,7 @@ async def close_database_connection():
 async def main():
     """Main entry point for the MCP server"""
     logger.info("🚀 Starting Home Assistant MCP Server")
-    logger.info("📦 Version: 0.2.7")
+    logger.info("📦 Version: 0.5.3")
     logger.info("🔧 Using official MCP Python SDK")
     
     # Initialize database connection
@@ -749,7 +749,7 @@ async def main():
                 write_stream,
                 InitializationOptions(
                     server_name="ha-mcp-server",
-                    server_version="0.2.7",
+                    server_version="0.5.3",
                     capabilities=server_instance.server.get_capabilities(
                         notification_options=NotificationOptions(),
                         experimental_capabilities={}

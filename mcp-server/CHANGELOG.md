@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2025-08-31
+
+### 🔧 Fixed - Add-on Store Visibility
+
+### Fixed
+- **Add-on Store Visibility**: Fixed configuration issues preventing add-on from appearing in store
+- **Invalid Service Dependency**: Removed `postgresql:want` service dependency that caused validation errors
+- **Repository Configuration**: Added missing repository.yaml for proper store integration
+- **Version Correction**: Corrected version numbering to proper incremental 0.5.3
+
+### Changed
+- **Service Dependencies**: Removed invalid PostgreSQL service dependency
+- **Configuration Validation**: Ensured all config options follow HA add-on guidelines
+- **Repository Files**: Added proper repository.yaml alongside repository.json
+
+### Technical Details
+- Fixed Home Assistant add-on store parsing issues
+- Removed test files that were causing build complexity
+- Maintained all MCP server functionality with official SDK
+- Configuration now validates correctly with HA add-on schema
+
 ## [0.5.2] - 2025-08-31
 
 ### 🛠️ Fixed - MCP SDK Import Error

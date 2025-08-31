@@ -1,12 +1,12 @@
 # 🛠️ Home Assistant MCP Server Add-on
 
 [![Build & Push](https://github.com/mar-eid/ha-addon-mcp/actions/workflows/build.yml/badge.svg)](https://github.com/mar-eid/ha-addon-mcp/actions/workflows/build.yml)
-[![Version](https://img.shields.io/badge/version-0.2.7-blue)](https://github.com/mar-eid/ha-addon-mcp/releases)
+[![Version](https://img.shields.io/badge/version-0.5.3-blue)](https://github.com/mar-eid/ha-addon-mcp/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 A [Home Assistant](https://www.home-assistant.io/) add-on that runs a **Model Context Protocol (MCP) server** for querying historical data from PostgreSQL/TimescaleDB. This enables AI assistants (like OpenAI through Home Assistant Assist) to access and analyze your home automation data.
 
-🛠️ **Version 0.2.7 Update**: Fixed critical MCP SDK import error - now works with the official MCP Python SDK!
+🛠️ **Version 0.5.3 Update**: Fixed add-on store visibility issues - now properly appears in Home Assistant Add-on Store!
 
 ---
 
@@ -161,11 +161,13 @@ docker build -t ha-addon-mcp ./mcp-server
 
 ## 🐛 Troubleshooting
 
-### ✅ Version 0.2.7 Fixes
+### ✅ Version 0.5.3 Fixes
 
-This version fixes the critical import error:
-- ❌ Old: `ModuleNotFoundError: No module named 'mcp.server.fastmcp'`
-- ✅ New: Uses correct MCP SDK imports (`mcp.types`, `mcp.server`)
+This version fixes add-on store visibility:
+- ✅ **Fixed**: Add-on now appears in Home Assistant Add-on Store
+- ✅ **Removed**: Invalid PostgreSQL service dependency causing validation errors
+- ✅ **Added**: Missing repository.yaml for proper store integration
+- ✅ **Uses**: Correct MCP SDK imports (`mcp.types`, `mcp.server`)
 
 ### Testing the Fix
 
@@ -204,11 +206,11 @@ If the MCP Client has issues:
 
 ## 📜 Changelog
 
-### v0.2.7 (2025-08-31) - 🛠️ Critical Fix
-- **Fixed**: `ModuleNotFoundError: No module named 'mcp.server.fastmcp'`
-- **Updated**: Correct MCP SDK imports and server implementation
-- **Added**: Test script for local verification
-- **Maintained**: All existing functionality and compatibility
+### v0.5.3 (2025-08-31) - 🔧 Store Visibility Fix
+- **Fixed**: Add-on store visibility issues preventing installation
+- **Removed**: Invalid PostgreSQL service dependency causing validation errors
+- **Added**: Missing repository.yaml for proper HA store integration
+- **Maintained**: All MCP functionality with official SDK
 
 See [CHANGELOG.md](mcp-server/CHANGELOG.md) for complete version history.
 
