@@ -1,0 +1,51 @@
+ARG BUILD_FROM
+FROM $BUILD_FROM
+
+# Install system dependencies
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    postgresql-client \
+    curl \
+    libpq \
+    py3-wheel
+
+# Create app directory
+WORKDIR /app
+
+# Copy requirements first for better caching
+COPY requirements.txt ./
+
+# Install Python dependencies with error handling
+RUN set -eux; \
+    echo "Installing Python packages..."; \
+    pip3 install --break-system-packages --no-cache-dir \
+        --only-binary=all \
+        --prefer-binary \
+        mcp==1.1.2 \
+        asyncpg==0.29.0 \
+        psycopg2-binary==2.9.9 \
+        python-dateutil==2.8.2 \
+        fastapi==0.104.1 \
+        uvicorn==0.24.0 \
+    || { \
+        echo "Binary install failed, trying with build deps..."; \
+        apk add --no-cache --virtual .build-deps \
+            gcc musl-dev postgresql-dev python3-dev libffi-dev; \
+        pip3 install --break-system-packages --no-cache-dir -r requirements.txt; \
+        apk del .build-deps; \
+    }
+
+# Copy application files
+COPY server.py ./
+COPY run.sh ./
+
+# Make run script executable
+RUN chmod +x run.sh
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8099/health || exit 1
+
+# Run the application
+CMD ["./run.sh"]
