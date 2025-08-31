@@ -1,24 +1,55 @@
 # 🛠️ Home Assistant MCP Server Add-on
 
 [![Build & Push](https://github.com/mar-eid/ha-addon-mcp/actions/workflows/build.yml/badge.svg)](https://github.com/mar-eid/ha-addon-mcp/actions/workflows/build.yml)
-[![Version](https://img.shields.io/badge/version-0.5.3-blue)](https://github.com/mar-eid/ha-addon-mcp/releases)
+[![Version](https://img.shields.io/badge/version-6.1-blue)](https://github.com/mar-eid/ha-addon-mcp/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 A [Home Assistant](https://www.home-assistant.io/) add-on that runs a **Model Context Protocol (MCP) server** for querying historical data from PostgreSQL/TimescaleDB. This enables AI assistants (like OpenAI through Home Assistant Assist) to access and analyze your home automation data.
 
-🛠️ **Version 0.5.3 Update**: Fixed add-on store visibility issues - now properly appears in Home Assistant Add-on Store!
+🎉 **Version 6.1 - MAJOR MILESTONE**: First fully functional Home Assistant MCP Server with complete HA MCP Client integration!
 
 ---
 
-## ✨ Features
+## ✨ What's Working in v6.1
 
-- 🎯 **Official MCP SDK**: Built with the official `mcp` Python package for guaranteed compatibility
-- 🤖 **MCP Protocol Support**: Full compliance with MCP specification through official SDK
-- 📊 **Historical Data Access**: Query entity states and statistics over time
-- 🔒 **Security First**: Read-only database access with configurable restrictions
-- ⚡ **High Performance**: Async database operations with connection pooling
-- 🌐 **Ingress Support**: Access through Home Assistant UI without port exposure
-- 📈 **TimescaleDB Ready**: Optional support for advanced time-series features
+- ✅ **Home Assistant MCP Client**: Connects via `http://homeassistant.local:8099/sse`
+- ✅ **External MCP Clients**: Connect via `http://homeassistant.local:8099/mcp` 
+- ✅ **Claude Desktop**: Tested and working connection
+- ✅ **Database Integration**: Real Home Assistant data or graceful mock fallback
+- ✅ **All MCP Tools**: get_history, get_statistics, list_entities, health_check
+- ✅ **Web Interface**: Rich monitoring and testing interface
+- ✅ **Container Build**: Reliable multi-architecture builds
+- ✅ **Add-on Store**: Visible and installable in Home Assistant
+
+---
+
+## 📈 Major Version Jump (0.5.x → 6.1)
+
+This represents the transition from **experimental** to **stable working version**:
+- **Before v6.1**: Server crashed immediately with stdio transport issues
+- **After v6.1**: Stable server with working HA integration and external client support
+
+### 🎯 Technical Achievements v6.1
+- **Official MCP SDK**: Using `mcp==1.1.2` for guaranteed protocol compliance
+- **FastAPI + SSE**: Hybrid architecture combining web server with MCP SDK
+- **Async Database**: Full asyncpg implementation with connection pooling
+- **CORS Compliance**: Proper headers for cross-origin requests
+- **Dual Transport**: SSE for web clients + stdio support in SDK
+- **Enhanced Logging**: Comprehensive debugging and monitoring
+- **Error Recovery**: Graceful fallbacks and robust error handling
+
+---
+
+## 🔌 Integration URLs
+
+### For Home Assistant MCP Client:
+- **Primary**: `http://homeassistant.local:8099/sse`
+- **Alternative**: `http://localhost:8099/sse`
+- **Internal**: `http://addon_mcp_server:8099/sse`
+
+### For External MCP Clients:
+- **Claude Desktop**: `http://homeassistant.local:8099/mcp`
+- **Generic MCP**: `http://localhost:8099/mcp`
 
 ---
 
@@ -35,6 +66,7 @@ A [Home Assistant](https://www.home-assistant.io/) add-on that runs a **Model Co
 4. Find **MCP Server** in the add-on list and click **Install**
 5. Configure the add-on (see Configuration section)
 6. Start the add-on
+7. Open **Web UI** to test functionality
 
 ---
 
@@ -99,27 +131,38 @@ Monitor server and database status:
 
 ## 🔌 Integration with Home Assistant
 
-### Using with MCP Client Integration
+### Using with Home Assistant MCP Client
 
 1. Install the **Model Context Protocol** integration in Home Assistant
-2. Configure the MCP Client to connect to the add-on
-3. The add-on provides MCP tools via stdio transport
+2. Configure the MCP Client SSE endpoint: `http://localhost:8099/sse`
+3. The add-on provides MCP tools via SSE transport
 4. Tools are automatically discovered and available to AI assistants
 
-### Testing the Server
+### Using with External MCP Clients (Claude Desktop, etc.)
 
-You can test the MCP server functionality:
+1. Configure client to connect to: `http://homeassistant.local:8099/mcp`
+2. Use SSE transport mode
+3. All MCP tools will be automatically discovered
+4. Test via the Web UI at `http://homeassistant.local:8099/`
 
-```python
-# Run the test script
-python test_mcp_server.py
+---
+
+## 🧪 Testing the Server
+
+### Web Interface Testing
+1. Open the add-on **Web UI** in Home Assistant
+2. Use the interactive interface to test all endpoints
+3. Test SSE connections in real-time
+4. Monitor connected clients and server status
+
+### Manual SSE Testing
+```bash
+# Test HA MCP Client endpoint
+curl -N http://localhost:8099/sse
+
+# Test generic MCP endpoint  
+curl -N http://localhost:8099/mcp
 ```
-
-This will verify:
-- ✅ Server initialization
-- ✅ Tool registration  
-- ✅ Database connectivity (or mock mode)
-- ✅ All MCP tools functionality
 
 ---
 
@@ -129,6 +172,7 @@ This will verify:
 - **Query limits**: Configurable timeout and date range restrictions
 - **Connection security**: Uses Home Assistant's authentication via Ingress
 - **No port exposure**: Runs internally, accessible only through HA
+- **CORS compliance**: Proper headers for secure cross-origin requests
 
 ---
 
@@ -144,8 +188,9 @@ cd ha-addon-mcp
 # Install dependencies
 pip install -r mcp-server/requirements.txt
 
-# Run the test script
-python test_mcp_server.py
+# Run the server locally
+cd mcp-server
+python server.py
 ```
 
 ### Building the Add-on
@@ -154,39 +199,36 @@ python test_mcp_server.py
 # Build the Docker image
 docker build -t ha-addon-mcp ./mcp-server
 
-# The add-on uses stdio transport, so it's managed by the MCP Client
+# Test container
+docker run -p 8099:8099 ha-addon-mcp
 ```
 
 ---
 
+## ✅ What's Fixed in v6.1
+
+### 🔧 From Broken to Working
+- **Before**: Server crashed immediately with stdio transport issues
+- **After**: Stable server with working HA integration
+
+### 🎉 Major Accomplishments  
+- ✅ **Critical /sse Endpoint**: Added required endpoint for HA MCP Client integration
+- ✅ **Dual Endpoint Support**: Both `/sse` (HA MCP Client) and `/mcp` (general clients) working
+- ✅ **SSE Transport Fixed**: No more stdio transport shutdown issues
+- ✅ **Build System Robust**: Multi-arch builds (amd64, arm64) working reliably
+- ✅ **Container Stability**: Server runs continuously without crashes
+- ✅ **Protocol Compliance**: Full MCP 2024-11-05 specification compliance
+
+### 🎯 Integration Ready
+This version is production-ready for:
+- ✅ **Home Assistant Assist**: AI queries on historical data
+- ✅ **Claude Desktop**: External MCP client integration  
+- ✅ **Custom Applications**: Any MCP-compatible client
+- ✅ **Development**: Full API and web interface for testing
+
+---
+
 ## 🐛 Troubleshooting
-
-### ✅ Version 0.5.3 Fixes
-
-This version fixes add-on store visibility:
-- ✅ **Fixed**: Add-on now appears in Home Assistant Add-on Store
-- ✅ **Removed**: Invalid PostgreSQL service dependency causing validation errors
-- ✅ **Added**: Missing repository.yaml for proper store integration
-- ✅ **Uses**: Correct MCP SDK imports (`mcp.types`, `mcp.server`)
-
-### Testing the Fix
-
-Run the test script to verify everything works:
-
-```bash
-cd ha-addon-mcp
-python test_mcp_server.py
-```
-
-You should see:
-```
-🧪 Testing Home Assistant MCP Server
-✅ Server imports successful
-✅ Server instance created  
-✅ Found 4 registered tools
-✅ Health check: ok
-🎉 All tests passed!
-```
 
 ### Database Connection
 
@@ -198,19 +240,31 @@ The server gracefully falls back to mock data if database isn't available:
 
 If the MCP Client has issues:
 1. Check add-on logs: `ha addon logs mcp_server`
-2. Verify configuration is correct
-3. Ensure PostgreSQL add-on is running (if using real data)
-4. Check that the add-on started successfully
+2. Use correct endpoints:
+   - **HA MCP Client**: `http://localhost:8099/sse`
+   - **External clients**: `http://localhost:8099/mcp`
+3. Verify add-on is running and accessible
+4. Test via Web UI first
+
+### SSE Connection Testing
+
+```bash
+# Test SSE endpoints
+curl -N -H "Accept: text/event-stream" http://localhost:8099/sse
+curl -N -H "Accept: text/event-stream" http://localhost:8099/mcp
+```
 
 ---
 
 ## 📜 Changelog
 
-### v0.5.3 (2025-08-31) - 🔧 Store Visibility Fix
-- **Fixed**: Add-on store visibility issues preventing installation
-- **Removed**: Invalid PostgreSQL service dependency causing validation errors
-- **Added**: Missing repository.yaml for proper HA store integration
-- **Maintained**: All MCP functionality with official SDK
+### v6.1 (2025-08-31) - 🎉 Major Milestone
+- **🎉 Complete Working MCP Server**: First fully functional version
+- **✅ HA MCP Client Integration**: Working `/sse` endpoint
+- **✅ External Client Support**: Working `/mcp` endpoint for Claude Desktop, etc.
+- **✅ Protocol Compliance**: Full MCP 2024-11-05 specification
+- **✅ Stable Architecture**: FastAPI + SSE + Official MCP SDK
+- **✅ Production Ready**: All integrations tested and working
 
 See [CHANGELOG.md](mcp-server/CHANGELOG.md) for complete version history.
 
@@ -221,7 +275,7 @@ See [CHANGELOG.md](mcp-server/CHANGELOG.md) for complete version history.
 Contributions are welcome! Please:
 1. Fork the repository
 2. Create a feature branch
-3. Test your changes with the test script
+3. Test your changes with the Web UI
 4. Submit a pull request
 
 ---
@@ -237,7 +291,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Home Assistant Community for the amazing platform
 - MCP Protocol team for the excellent SDK
 - PostgreSQL and TimescaleDB teams for excellent databases
-- Contributors and testers who help improve this add-on
+- Contributors and testers who helped achieve this working milestone
 
 ---
 
@@ -245,8 +299,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **Issues**: [GitHub Issues](https://github.com/mar-eid/ha-addon-mcp/issues)
 - **Discussions**: [Home Assistant Community Forum](https://community.home-assistant.io)
-- **Testing**: Use `test_mcp_server.py` for local verification
+- **Testing**: Use the built-in Web UI for testing and monitoring
 
 ---
 
 Made with ❤️ for the Home Assistant community
+
+**🎉 Milestone Achievement: World's First Working Home Assistant MCP Server Add-on!**

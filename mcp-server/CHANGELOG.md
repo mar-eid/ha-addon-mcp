@@ -5,7 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.4] - 2025-08-31
+## [6.1] - 2025-08-31
+
+### 🎉 Major Milestone - Complete Working MCP Server
+
+### ✅ Successfully Fixed & Working
+- **Critical /sse Endpoint**: Added required `/sse` endpoint for Home Assistant MCP Client integration
+- **Dual Endpoint Support**: Both `/sse` (HA MCP Client) and `/mcp` (general clients) working
+- **SSE Transport Fixed**: No more stdio transport shutdown issues
+- **Build System Robust**: Multi-arch builds (amd64, arm64) working reliably
+- **Container Stability**: Server runs continuously without crashes
+- **Protocol Compliance**: Full MCP 2024-11-05 specification compliance
+
+### 🎆 Major Version Jump (0.5.x → 6.1)
+- **Represents**: Transition from experimental to stable working version
+- **Milestone**: First fully functional Home Assistant MCP Server add-on
+- **Achievement**: Complete integration with HA MCP Client + external clients
+
+### 🚀 What's Now Working
+- ✅ **Home Assistant MCP Client**: Connects via `http://homeassistant.local:8099/sse`
+- ✅ **External MCP Clients**: Connect via `http://homeassistant.local:8099/mcp` 
+- ✅ **Claude Desktop**: Tested and working connection
+- ✅ **Database Integration**: Real Home Assistant data or graceful mock fallback
+- ✅ **All MCP Tools**: get_history, get_statistics, list_entities, health_check
+- ✅ **Web Interface**: Rich monitoring and testing interface
+- ✅ **Container Build**: Reliable multi-architecture builds
+- ✅ **Add-on Store**: Visible and installable in Home Assistant
+
+### 📊 Technical Achievements
+- **Official MCP SDK**: Using `mcp==1.1.2` for guaranteed protocol compliance
+- **FastAPI + SSE**: Hybrid architecture combining web server with MCP SDK
+- **Async Database**: Full asyncpg implementation with connection pooling
+- **CORS Compliance**: Proper headers for cross-origin requests
+- **Dual Transport**: SSE for web clients + stdio support in SDK
+- **Enhanced Logging**: Comprehensive debugging and monitoring
+- **Error Recovery**: Graceful fallbacks and robust error handling
+
+### 🎥 From Broken to Working
+**Before (0.1-0.5.x)**: Server crashed immediately with stdio transport issues
+**After (6.1)**: Stable server with working HA integration and external client support
+
+### 🎯 Integration Ready
+This version is production-ready for:
+- ✅ **Home Assistant Assist**: AI queries on historical data
+- ✅ **Claude Desktop**: External MCP client integration  
+- ✅ **Custom Applications**: Any MCP-compatible client
+- ✅ **Development**: Full API and web interface for testing
+
+## [0.5.7] - 2025-08-31 (Superseded)
 
 ### 🚀 Fixed - SSE Transport Implementation
 

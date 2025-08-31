@@ -4,7 +4,7 @@
 # Direct run script (no s6-overlay complexity)
 # ==============================================================================
 
-echo "🚀 Starting MCP Server v0.5.4 (SSE Transport + Official MCP SDK)..."
+echo "🚀 Starting MCP Server v6.1 (SSE Transport + Official MCP SDK)..."
 
 # Read configuration from Home Assistant
 PG_HOST=$(bashio::config 'pg_host')

@@ -1,7 +1,7 @@
 """
 Home Assistant MCP Server
 Model Context Protocol server for Home Assistant historical data
-Version: 0.5.4
+Version: 6.1
 """
 import os
 import asyncio
@@ -16,7 +16,7 @@ from asyncpg.pool import Pool
 
 # FastAPI for SSE transport
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi.responses import StreamingResponse, HTMLResponse, Response
 import uvicorn
 
 # MCP imports - using the correct import paths
@@ -53,7 +53,7 @@ logger.info(f"📅 Max query days: {MAX_QUERY_DAYS}")
 db_pool: Optional[Pool] = None
 
 # FastAPI app
-app = FastAPI(title="Home Assistant MCP Server", version="0.5.4")
+app = FastAPI(title="Home Assistant MCP Server", version="6.1")
 
 # Global MCP server instance
 mcp_server_instance = None
@@ -608,7 +608,7 @@ class HAMCPServer:
         
         return {
             "status": "ok",
-            "version": "0.5.4",
+            "version": "6.1",
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "database": {
                 "status": db_status,
@@ -751,7 +751,7 @@ async def root():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Home Assistant MCP Server v0.5.4</title>
+        <title>Home Assistant MCP Server v6.1</title>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
@@ -770,14 +770,27 @@ async def root():
         <div class="header">
             <h1>🛠️ Home Assistant MCP Server</h1>
             <p>Model Context Protocol server for historical data access</p>
-            <p><strong>Version:</strong> 0.5.4 | <strong>Transport:</strong> SSE (Server-Sent Events)</p>
+            <p><strong>Version:</strong> 6.1 | <strong>Transport:</strong> SSE (Server-Sent Events)</p>
+        </div>
+
+        <div class="section">
+            <h2>🔌 Integration URLs</h2>
+            <p><strong>For Home Assistant MCP Client Integration:</strong></p>
+            <ul>
+                <li><strong>Primary:</strong> <code>http://homeassistant.local:8099/sse</code></li>
+                <li><strong>Alternative:</strong> <code>http://localhost:8099/sse</code></li>
+                <li><strong>Internal:</strong> <code>http://addon_mcp_server:8099/sse</code></li>
+            </ul>
+            <p><em>Use the SSE endpoint URL in MCP Client configuration</em></p>
         </div>
 
         <div class="section">
             <h2>📡 MCP Protocol Endpoints</h2>
-            <p><strong>SSE Endpoint:</strong> <span class="endpoint">GET /mcp</span></p>
+            <p><strong>HA MCP Client:</strong> <span class="endpoint">GET /sse</span></p>
+            <p><strong>General MCP:</strong> <span class="endpoint">GET /mcp</span></p>
             <p><strong>Tool Calls:</strong> <span class="endpoint">POST /mcp/call</span></p>
             <p><strong>Health Check:</strong> <span class="endpoint">GET /health</span></p>
+            <p><strong>Test SSE:</strong> <a href="/sse" target="_blank">Open HA SSE Stream</a> | <a href="/mcp" target="_blank">Open Generic SSE</a></p>
         </div>
 
         <div class="section">
@@ -848,13 +861,27 @@ async def health_endpoint():
         return await mcp_server_instance.health_check()
     return {"status": "error", "message": "MCP server not initialized"}
 
-@app.get("/mcp")
-async def mcp_sse_endpoint(request: Request):
-    """SSE endpoint for MCP protocol"""
+@app.options("/sse")
+async def sse_options():
+    """Handle CORS preflight requests for SSE endpoint"""
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Cache-Control,Content-Type,Authorization",
+            "Access-Control-Max-Age": "86400"
+        }
+    )
+
+@app.get("/sse")
+async def sse_endpoint(request: Request):
+    """SSE endpoint specifically for Home Assistant MCP Client"""
     client_id = str(uuid.uuid4())
     connected_clients.add(client_id)
     
-    logger.info(f"🔗 New SSE client connected: {client_id}")
+    logger.info(f"🔗 HA MCP Client connected via /sse: {client_id}")
+    logger.info(f"🌍 Client headers: {dict(request.headers)}")
     
     async def generate_mcp_events():
         try:
@@ -869,11 +896,12 @@ async def mcp_sse_endpoint(request: Request):
                     },
                     "serverInfo": {
                         "name": "ha-mcp-server",
-                        "version": "0.5.4"
+                        "version": "6.1"
                     }
                 }
             }
             yield f"data: {json.dumps(init_event)}\\n\\n"
+            logger.info("🔄 Sent initialization event to HA MCP Client")
             
             # Send tools list
             if mcp_server_instance:
@@ -892,6 +920,109 @@ async def mcp_sse_endpoint(request: Request):
                     }
                 }
                 yield f"data: {json.dumps(tools_event)}\\n\\n"
+                logger.info(f"🛠️ Sent {len(mcp_server_instance.tools)} tools to HA MCP Client")
+            
+            # Keep connection alive with pings
+            sequence = 0
+            while True:
+                await asyncio.sleep(30)  # Ping every 30 seconds
+                
+                # Check if client disconnected
+                if await request.is_disconnected():
+                    logger.info(f"🔌 HA MCP Client disconnected: {client_id}")
+                    break
+                    
+                sequence += 1
+                ping_event = {
+                    "jsonrpc": "2.0",
+                    "method": "ping", 
+                    "params": {
+                        "sequence": sequence,
+                        "timestamp": datetime.utcnow().isoformat() + "Z"
+                    }
+                }
+                yield f"data: {json.dumps(ping_event)}\\n\\n"
+                logger.debug(f"🏓 Ping {sequence} sent to HA MCP Client {client_id}")
+                
+        except Exception as e:
+            logger.error(f"SSE error for HA MCP Client {client_id}: {e}")
+        finally:
+            connected_clients.discard(client_id)
+            logger.info(f"🔌 HA MCP Client removed: {client_id}")
+    
+    return StreamingResponse(
+        generate_mcp_events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Cache-Control,Content-Type,Authorization",
+            "Access-Control-Allow-Methods": "GET,OPTIONS",
+            "X-Accel-Buffering": "no"  # Disable nginx buffering
+        }
+    )
+
+@app.options("/mcp")
+async def mcp_options():
+    """Handle CORS preflight requests"""
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Cache-Control,Content-Type,Authorization",
+            "Access-Control-Max-Age": "86400"
+        }
+    )
+
+@app.get("/mcp")
+async def mcp_sse_endpoint(request: Request):
+    """SSE endpoint for MCP protocol"""
+    client_id = str(uuid.uuid4())
+    connected_clients.add(client_id)
+    
+    logger.info(f"🔗 New SSE client connected: {client_id}")
+    logger.info(f"🌍 Client headers: {dict(request.headers)}")
+    
+    async def generate_mcp_events():
+        try:
+            # Send initialization event
+            init_event = {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "serverInfo": {
+                        "name": "ha-mcp-server",
+                        "version": "6.1"
+                    }
+                }
+            }
+            yield f"data: {json.dumps(init_event)}\\n\\n"
+            logger.info("🔄 Sent initialization event")
+            
+            # Send tools list
+            if mcp_server_instance:
+                tools_event = {
+                    "jsonrpc": "2.0", 
+                    "method": "tools/list",
+                    "result": {
+                        "tools": [
+                            {
+                                "name": tool.name,
+                                "description": tool.description,
+                                "inputSchema": tool.inputSchema
+                            }
+                            for tool in mcp_server_instance.tools
+                        ]
+                    }
+                }
+                yield f"data: {json.dumps(tools_event)}\\n\\n"
+                logger.info(f"🛠️ Sent {len(mcp_server_instance.tools)} tools")
             
             # Keep connection alive with pings
             sequence = 0
@@ -913,6 +1044,7 @@ async def mcp_sse_endpoint(request: Request):
                     }
                 }
                 yield f"data: {json.dumps(ping_event)}\\n\\n"
+                logger.debug(f"🏓 Ping {sequence} sent to {client_id}")
                 
         except Exception as e:
             logger.error(f"SSE error for client {client_id}: {e}")
@@ -927,7 +1059,9 @@ async def mcp_sse_endpoint(request: Request):
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Cache-Control"
+            "Access-Control-Allow-Headers": "Cache-Control,Content-Type,Authorization",
+            "Access-Control-Allow-Methods": "GET,OPTIONS",
+            "X-Accel-Buffering": "no"  # Disable nginx buffering
         }
     )
 
@@ -1001,7 +1135,7 @@ async def startup_event():
     global mcp_server_instance
     
     logger.info("🚀 Starting Home Assistant MCP Server")
-    logger.info("📦 Version: 0.5.4")
+    logger.info("📦 Version: 6.1")
     logger.info("🔧 Using SSE transport with official MCP SDK")
     
     # Initialize database connection
@@ -1030,6 +1164,11 @@ app.add_event_handler("shutdown", shutdown_event)
 
 if __name__ == "__main__":
     logger.info(f"🌐 Starting FastAPI server on port {MCP_PORT}")
+    logger.info(f"🔗 Internal URLs to try in MCP Client:")
+    logger.info(f"   - http://localhost:8099/mcp")
+    logger.info(f"   - http://addon_mcp_server:8099/mcp")
+    logger.info(f"   - http://a0d7b954-mcp-server:8099/mcp")
+    logger.info(f"   - http://mcp-server:8099/mcp")
     uvicorn.run(
         app, 
         host="0.0.0.0", 
