@@ -1,22 +1,28 @@
 """
 Home Assistant MCP Server
 Model Context Protocol server for Home Assistant historical data
-Version: 0.5.3
+Version: 0.5.4
 """
 import os
 import asyncio
 import sys
 import logging
+import json
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Union
 import asyncpg
 from asyncpg.pool import Pool
 
+# FastAPI for SSE transport
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse, HTMLResponse
+import uvicorn
+
 # MCP imports - using the correct import paths
 import mcp.types as types
 from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
-import mcp.server.stdio
 
 # Configure logging
 logging.basicConfig(
@@ -35,6 +41,7 @@ READ_ONLY = os.getenv("MCP_READ_ONLY", "true").lower() == "true"
 ENABLE_TIMESCALE = os.getenv("MCP_ENABLE_TIMESCALEDB", "false").lower() == "true"
 QUERY_TIMEOUT = int(os.getenv("MCP_QUERY_TIMEOUT", "30"))
 MAX_QUERY_DAYS = int(os.getenv("MCP_MAX_QUERY_DAYS", "90"))
+MCP_PORT = int(os.getenv("MCP_PORT", "8099"))
 
 logger.info(f"📝 Log level: {logging.getLogger().level}")
 logger.info(f"🗄️ Database: {DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
@@ -45,12 +52,117 @@ logger.info(f"📅 Max query days: {MAX_QUERY_DAYS}")
 # Global database pool
 db_pool: Optional[Pool] = None
 
+# FastAPI app
+app = FastAPI(title="Home Assistant MCP Server", version="0.5.4")
+
+# Global MCP server instance
+mcp_server_instance = None
+connected_clients = set()
+
 class HAMCPServer:
     """Home Assistant MCP Server Implementation"""
     
     def __init__(self):
         self.server = Server("ha-mcp-server")
+        self.tools = []
         self._register_handlers()
+        self._setup_tools()
+    
+    def _setup_tools(self):
+        """Setup the tool definitions"""
+        self.tools = [
+            types.Tool(
+                name="get_history",
+                description="Query historical state data from Home Assistant recorder",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "The entity to query (e.g., 'sensor.temperature')"
+                        },
+                        "start": {
+                            "type": "string",
+                            "description": "Start datetime in ISO format"
+                        },
+                        "end": {
+                            "type": "string",
+                            "description": "End datetime in ISO format"
+                        },
+                        "interval": {
+                            "type": "string",
+                            "enum": ["raw", "5m", "15m", "30m", "1h", "6h", "1d"],
+                            "description": "Time interval for aggregation",
+                            "default": "1h"
+                        },
+                        "aggregation": {
+                            "type": "string",
+                            "enum": ["mean", "min", "max", "sum", "last", "first"],
+                            "description": "Aggregation method",
+                            "default": "mean"
+                        }
+                    },
+                    "required": ["entity_id", "start", "end"]
+                }
+            ),
+            types.Tool(
+                name="get_statistics",
+                description="Query aggregated statistics data from Home Assistant",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "statistic_id": {
+                            "type": "string",
+                            "description": "The statistic to query"
+                        },
+                        "start": {
+                            "type": "string",
+                            "description": "Start datetime in ISO format"
+                        },
+                        "end": {
+                            "type": "string",
+                            "description": "End datetime in ISO format"
+                        },
+                        "period": {
+                            "type": "string",
+                            "enum": ["5minute", "hour", "day", "month"],
+                            "description": "Statistics period",
+                            "default": "hour"
+                        }
+                    },
+                    "required": ["statistic_id", "start", "end"]
+                }
+            ),
+            types.Tool(
+                name="list_entities",
+                description="List available entities and statistics for querying",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of items to return",
+                            "default": 100,
+                            "minimum": 1,
+                            "maximum": 500
+                        },
+                        "entity_type": {
+                            "type": "string",
+                            "description": "Filter by entity type (e.g., 'sensor', 'binary_sensor')",
+                            "default": None
+                        }
+                    }
+                }
+            ),
+            types.Tool(
+                name="health_check",
+                description="Check server and database health status",
+                inputSchema={
+                    "type": "object",
+                    "properties": {}
+                }
+            )
+        ]
     
     def _register_handlers(self):
         """Register all MCP handlers"""
@@ -58,99 +170,7 @@ class HAMCPServer:
         @self.server.list_tools()
         async def handle_list_tools() -> List[types.Tool]:
             """List available MCP tools"""
-            return [
-                types.Tool(
-                    name="get_history",
-                    description="Query historical state data from Home Assistant recorder",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "entity_id": {
-                                "type": "string",
-                                "description": "The entity to query (e.g., 'sensor.temperature')"
-                            },
-                            "start": {
-                                "type": "string",
-                                "description": "Start datetime in ISO format"
-                            },
-                            "end": {
-                                "type": "string",
-                                "description": "End datetime in ISO format"
-                            },
-                            "interval": {
-                                "type": "string",
-                                "enum": ["raw", "5m", "15m", "30m", "1h", "6h", "1d"],
-                                "description": "Time interval for aggregation",
-                                "default": "1h"
-                            },
-                            "aggregation": {
-                                "type": "string",
-                                "enum": ["mean", "min", "max", "sum", "last", "first"],
-                                "description": "Aggregation method",
-                                "default": "mean"
-                            }
-                        },
-                        "required": ["entity_id", "start", "end"]
-                    }
-                ),
-                types.Tool(
-                    name="get_statistics",
-                    description="Query aggregated statistics data from Home Assistant",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "statistic_id": {
-                                "type": "string",
-                                "description": "The statistic to query"
-                            },
-                            "start": {
-                                "type": "string",
-                                "description": "Start datetime in ISO format"
-                            },
-                            "end": {
-                                "type": "string",
-                                "description": "End datetime in ISO format"
-                            },
-                            "period": {
-                                "type": "string",
-                                "enum": ["5minute", "hour", "day", "month"],
-                                "description": "Statistics period",
-                                "default": "hour"
-                            }
-                        },
-                        "required": ["statistic_id", "start", "end"]
-                    }
-                ),
-                types.Tool(
-                    name="list_entities",
-                    description="List available entities and statistics for querying",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "limit": {
-                                "type": "integer",
-                                "description": "Maximum number of items to return",
-                                "default": 100,
-                                "minimum": 1,
-                                "maximum": 500
-                            },
-                            "entity_type": {
-                                "type": "string",
-                                "description": "Filter by entity type (e.g., 'sensor', 'binary_sensor')",
-                                "default": null
-                            }
-                        }
-                    }
-                ),
-                types.Tool(
-                    name="health_check",
-                    description="Check server and database health status",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {}
-                    }
-                )
-            ]
+            return self.tools
         
         @self.server.call_tool()
         async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[types.TextContent]:
@@ -169,14 +189,14 @@ class HAMCPServer:
                 
                 return [types.TextContent(
                     type="text",
-                    text=str(result)
+                    text=json.dumps(result, indent=2)
                 )]
             
             except Exception as e:
                 logger.error(f"Error executing tool {name}: {e}")
                 return [types.TextContent(
                     type="text", 
-                    text=f"Error: {str(e)}"
+                    text=json.dumps({"error": str(e)}, indent=2)
                 )]
     
     async def get_history(
@@ -588,7 +608,7 @@ class HAMCPServer:
         
         return {
             "status": "ok",
-            "version": "0.5.3",
+            "version": "0.5.4",
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "database": {
                 "status": db_status,
@@ -599,7 +619,9 @@ class HAMCPServer:
                 "timescaledb": ENABLE_TIMESCALE,
                 "query_timeout": QUERY_TIMEOUT,
                 "max_query_days": MAX_QUERY_DAYS
-            }
+            },
+            "transport": "SSE",
+            "connected_clients": len(connected_clients)
         }
     
     def generate_mock_series(self, start: str, end: str, interval: str = "1h") -> List[Dict]:
@@ -719,14 +741,268 @@ async def close_database_connection():
         logger.info("🔌 Database connection closed")
 
 # =============================================================================
+# FastAPI Routes - SSE Transport + Web UI
+# =============================================================================
+
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    """Root endpoint with information about the MCP server"""
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Home Assistant MCP Server v0.5.4</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body { font-family: system-ui, -apple-system, sans-serif; margin: 2rem; line-height: 1.6; }
+            .header { background: #1976d2; color: white; padding: 1rem; border-radius: 8px; margin-bottom: 2rem; }
+            .section { background: #f5f5f5; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+            .status { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.9rem; }
+            .status.ok { background: #4caf50; color: white; }
+            .tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
+            .tool { background: white; padding: 1rem; border-radius: 6px; border-left: 4px solid #2196f3; }
+            code { background: #e8e8e8; padding: 0.2rem 0.4rem; border-radius: 3px; }
+            .endpoint { font-family: monospace; background: #263238; color: #4fc3f7; padding: 0.5rem; border-radius: 4px; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>🛠️ Home Assistant MCP Server</h1>
+            <p>Model Context Protocol server for historical data access</p>
+            <p><strong>Version:</strong> 0.5.4 | <strong>Transport:</strong> SSE (Server-Sent Events)</p>
+        </div>
+
+        <div class="section">
+            <h2>📡 MCP Protocol Endpoints</h2>
+            <p><strong>SSE Endpoint:</strong> <span class="endpoint">GET /mcp</span></p>
+            <p><strong>Tool Calls:</strong> <span class="endpoint">POST /mcp/call</span></p>
+            <p><strong>Health Check:</strong> <span class="endpoint">GET /health</span></p>
+        </div>
+
+        <div class="section">
+            <h2>🧰 Available MCP Tools</h2>
+            <div class="tools">
+                <div class="tool">
+                    <h3>get_history</h3>
+                    <p>Query historical state data from Home Assistant recorder with flexible aggregation options.</p>
+                </div>
+                <div class="tool">
+                    <h3>get_statistics</h3>
+                    <p>Retrieve statistical summaries (mean, min, max) from recorder database.</p>
+                </div>
+                <div class="tool">
+                    <h3>list_entities</h3>
+                    <p>Discover available entities and statistics with recent activity filtering.</p>
+                </div>
+                <div class="tool">
+                    <h3>health_check</h3>
+                    <p>Monitor server and database connectivity status.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🔌 Integration</h2>
+            <p><strong>Home Assistant MCP Client:</strong></p>
+            <ul>
+                <li>Install the <strong>Model Context Protocol</strong> integration</li>
+                <li>Configure SSE endpoint: <code>http://localhost:8099/mcp</code></li>
+                <li>Tools automatically available to AI assistants</li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h2>📊 Server Status</h2>
+            <p id="status">Loading...</p>
+            <p><strong>Connected SSE Clients:</strong> <span id="clients">0</span></p>
+        </div>
+
+        <script>
+            async function updateStatus() {
+                try {
+                    const response = await fetch('/health');
+                    const health = await response.json();
+                    document.getElementById('status').innerHTML = `
+                        <span class="status ok">✅ ${health.status.toUpperCase()}</span>
+                        Database: ${health.database.status} | 
+                        Version: ${health.version} |
+                        Transport: ${health.transport}
+                    `;
+                    document.getElementById('clients').textContent = health.connected_clients || 0;
+                } catch (e) {
+                    document.getElementById('status').innerHTML = '<span class="status error">❌ ERROR</span>';
+                }
+            }
+            updateStatus();
+            setInterval(updateStatus, 5000);
+        </script>
+    </body>
+    </html>
+    """
+
+@app.get("/health")
+async def health_endpoint():
+    """Health check endpoint"""
+    if mcp_server_instance:
+        return await mcp_server_instance.health_check()
+    return {"status": "error", "message": "MCP server not initialized"}
+
+@app.get("/mcp")
+async def mcp_sse_endpoint(request: Request):
+    """SSE endpoint for MCP protocol"""
+    client_id = str(uuid.uuid4())
+    connected_clients.add(client_id)
+    
+    logger.info(f"🔗 New SSE client connected: {client_id}")
+    
+    async def generate_mcp_events():
+        try:
+            # Send initialization event
+            init_event = {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "serverInfo": {
+                        "name": "ha-mcp-server",
+                        "version": "0.5.4"
+                    }
+                }
+            }
+            yield f"data: {json.dumps(init_event)}\\n\\n"
+            
+            # Send tools list
+            if mcp_server_instance:
+                tools_event = {
+                    "jsonrpc": "2.0", 
+                    "method": "tools/list",
+                    "result": {
+                        "tools": [
+                            {
+                                "name": tool.name,
+                                "description": tool.description,
+                                "inputSchema": tool.inputSchema
+                            }
+                            for tool in mcp_server_instance.tools
+                        ]
+                    }
+                }
+                yield f"data: {json.dumps(tools_event)}\\n\\n"
+            
+            # Keep connection alive with pings
+            sequence = 0
+            while True:
+                await asyncio.sleep(30)  # Ping every 30 seconds
+                
+                # Check if client disconnected
+                if await request.is_disconnected():
+                    logger.info(f"🔌 SSE client disconnected: {client_id}")
+                    break
+                    
+                sequence += 1
+                ping_event = {
+                    "jsonrpc": "2.0",
+                    "method": "ping", 
+                    "params": {
+                        "sequence": sequence,
+                        "timestamp": datetime.utcnow().isoformat() + "Z"
+                    }
+                }
+                yield f"data: {json.dumps(ping_event)}\\n\\n"
+                
+        except Exception as e:
+            logger.error(f"SSE error for client {client_id}: {e}")
+        finally:
+            connected_clients.discard(client_id)
+            logger.info(f"🔌 SSE client removed: {client_id}")
+    
+    return StreamingResponse(
+        generate_mcp_events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Cache-Control"
+        }
+    )
+
+@app.post("/mcp/call")
+async def mcp_call_tool(request: dict):
+    """Handle MCP tool calls via HTTP POST"""
+    try:
+        if not mcp_server_instance:
+            raise HTTPException(status_code=500, detail="MCP server not initialized")
+        
+        method = request.get("method")
+        params = request.get("params", {})
+        
+        if method == "tools/call":
+            tool_name = params.get("name")
+            arguments = params.get("arguments", {})
+            
+            # Call the tool
+            handler = mcp_server_instance.server._handlers.get("call_tool")
+            if handler:
+                result = await handler(tool_name, arguments)
+                
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request.get("id"),
+                    "result": {"content": result}
+                }
+            else:
+                raise HTTPException(status_code=404, detail="Tool handler not found")
+                
+        elif method == "tools/list":
+            handler = mcp_server_instance.server._handlers.get("list_tools") 
+            if handler:
+                tools = await handler()
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request.get("id"),
+                    "result": {
+                        "tools": [
+                            {
+                                "name": tool.name,
+                                "description": tool.description,
+                                "inputSchema": tool.inputSchema
+                            }
+                            for tool in tools
+                        ]
+                    }
+                }
+            else:
+                raise HTTPException(status_code=404, detail="Tools handler not found")
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown method: {method}")
+            
+    except Exception as e:
+        logger.error(f"MCP call error: {e}")
+        return {
+            "jsonrpc": "2.0", 
+            "id": request.get("id"),
+            "error": {
+                "code": -32603,
+                "message": str(e)
+            }
+        }
+
+# =============================================================================
 # Main Entry Point
 # =============================================================================
 
-async def main():
-    """Main entry point for the MCP server"""
+async def startup_event():
+    """Initialize everything on startup"""
+    global mcp_server_instance
+    
     logger.info("🚀 Starting Home Assistant MCP Server")
-    logger.info("📦 Version: 0.5.3")
-    logger.info("🔧 Using official MCP Python SDK")
+    logger.info("📦 Version: 0.5.4")
+    logger.info("🔧 Using SSE transport with official MCP SDK")
     
     # Initialize database connection
     db_connected = await init_database_connection()
@@ -737,40 +1013,26 @@ async def main():
     else:
         logger.info("✅ Database connected - ready to serve real data")
     
-    # Create server instance
-    server_instance = HAMCPServer()
-    
-    try:
-        # Run the MCP server with stdio transport
-        logger.info("🌐 Starting MCP server with stdio transport...")
-        async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-            await server_instance.server.run(
-                read_stream,
-                write_stream,
-                InitializationOptions(
-                    server_name="ha-mcp-server",
-                    server_version="0.5.3",
-                    capabilities=server_instance.server.get_capabilities(
-                        notification_options=NotificationOptions(),
-                        experimental_capabilities={}
-                    )
-                )
-            )
-    except KeyboardInterrupt:
-        logger.info("⏹️ Server stopped by user")
-    except Exception as e:
-        logger.error(f"💥 Server error: {e}")
-        raise
-    finally:
-        # Cleanup
-        await close_database_connection()
-        logger.info("🛑 Server shutdown complete")
+    # Create MCP server instance
+    mcp_server_instance = HAMCPServer()
+    logger.info("🌐 MCP server initialized with SSE transport")
+    logger.info(f"🔗 SSE endpoint: http://localhost:{MCP_PORT}/mcp")
+
+async def shutdown_event():
+    """Cleanup on shutdown"""
+    logger.info("🛑 Shutting down MCP Server...")
+    await close_database_connection()
+    logger.info("🛑 Server shutdown complete")
+
+# Add startup and shutdown events
+app.add_event_handler("startup", startup_event)
+app.add_event_handler("shutdown", shutdown_event)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("👋 Goodbye!")
-    except Exception as e:
-        logger.error(f"Fatal error: {e}")
-        sys.exit(1)
+    logger.info(f"🌐 Starting FastAPI server on port {MCP_PORT}")
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=MCP_PORT,
+        log_level="info" if os.getenv("LOG_LEVEL", "INFO").upper() != "DEBUG" else "debug"
+    )

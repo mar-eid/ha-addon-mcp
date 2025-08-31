@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2025-08-31
+
+### 🚀 Fixed - SSE Transport Implementation
+
+### Fixed
+- **Critical Transport Issue**: Fixed server immediately stopping after "Starting MCP server with stdio transport..."
+- **stdio Transport Problem**: Replaced stdio transport with SSE (Server-Sent Events) transport
+- **Container Compatibility**: Server now works properly in Docker container environment
+- **MCP Protocol Compliance**: Maintained full MCP protocol compliance with official SDK
+
+### Added
+- **SSE Transport**: Implemented proper Server-Sent Events endpoint at `/mcp`
+- **HTTP Tool Calls**: Added `/mcp/call` endpoint for tool execution
+- **Web Interface**: Enhanced root endpoint with server status and tool information
+- **FastAPI Integration**: Hybrid approach using FastAPI for transport + MCP SDK for tools
+- **Real-time Status**: Connected clients tracking and live status updates
+
+### Changed
+- **Transport Method**: From stdio (command-line) to SSE (web-based)
+- **Architecture**: Hybrid FastAPI server with MCP SDK tool registration
+- **Dependencies**: Added FastAPI and uvicorn for web server functionality
+- **Endpoints**: `/mcp` (SSE), `/mcp/call` (tool calls), `/health` (status)
+
+### Technical Details
+- Uses FastAPI for SSE transport layer
+- Maintains official MCP SDK for tool definitions and protocol compliance
+- Proper SSE keep-alive with 30-second ping events
+- JSON-RPC 2.0 compliant tool call handling
+- Full async implementation with database connection pooling
+- Works perfectly in containerized Home Assistant add-on environment
+
+### Compatibility
+- ✅ **Home Assistant MCP Client**: Can connect via SSE endpoint
+- ✅ **Web Browser**: Can test via web interface
+- ✅ **Container Environment**: No more stdin/stdout issues
+- ✅ **All MCP Tools**: get_history, get_statistics, list_entities, health_check
+
 ## [0.5.3] - 2025-08-31
 
 ### 🔧 Fixed - Add-on Store Visibility
