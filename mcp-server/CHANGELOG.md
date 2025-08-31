@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.3] - 2025-08-31
+
+### 🔍 SSL/TLS Connection Issues Fixed
+
+### Fixed
+- **SSL Certificate Validation**: Added guidance for HTTP-only connections to avoid SSL certificate validation issues
+- **Connection Debugging**: Enhanced logging to track client connection details and request information
+- **CORS Headers**: Improved CORS headers for better cross-origin request support
+- **SSE Stream Timing**: Added small delays in SSE initialization for better client compatibility
+
+### Added
+- **Test Endpoint**: Added `/mcp-test` endpoint for easy connectivity testing
+- **Connection Logging**: More detailed client connection information logging
+- **HTTP Guidance**: Clear startup messages about using HTTP (not HTTPS) for local connections
+- **Better Error Handling**: Enhanced error handling for SSL/TLS connection issues
+
+### Technical Details
+- Fixed SSL certificate validation blocking issue (`load_verify_locations`)
+- Added proper HTTP-only connection support for local Home Assistant add-ons
+- Enhanced SSE event timing to prevent connection issues
+- Improved CORS support with additional headers
+
+### Compatibility
+- ✅ **Home Assistant MCP Client**: Fixed SSL/certificate validation issues
+- ✅ **Local HTTP Connections**: Optimized for local HTTP-only communication
+- ✅ **External MCP Clients**: Maintains compatibility with all MCP clients
+- ✅ **All Tools**: get_history, get_statistics, list_entities, health_check working
+
 ## [6.2] - 2025-08-31
 
 ### 🔧 Enhanced HA MCP Client Compatibility

@@ -1,7 +1,7 @@
 """
 Home Assistant MCP Server
 Model Context Protocol server for Home Assistant historical data
-Version: 6.2
+Version: 6.3
 """
 import os
 import asyncio
@@ -632,7 +632,7 @@ class HAMCPServer:
         
         return {
             "status": "ok",
-            "version": "6.2",
+            "version": "6.3",
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "database": {
                 "status": db_status,
@@ -775,7 +775,7 @@ async def root():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Home Assistant MCP Server v6.2</title>
+        <title>Home Assistant MCP Server v6.3</title>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
@@ -794,7 +794,7 @@ async def root():
         <div class="header">
             <h1>🛠️ Home Assistant MCP Server</h1>
             <p>Model Context Protocol server for historical data access</p>
-            <p><strong>Version:</strong> 6.2 | <strong>Transport:</strong> SSE (Server-Sent Events)</p>
+            <p><strong>Version:</strong> 6.3 | <strong>Transport:</strong> SSE (Server-Sent Events)</p>
         </div>
 
         <div class="section">
@@ -885,6 +885,22 @@ async def health_endpoint():
         return await mcp_server_instance.health_check()
     return {"status": "error", "message": "MCP server not initialized"}
 
+@app.get("/mcp-test")
+async def mcp_test_endpoint():
+    """Simple test endpoint for MCP Client connectivity"""
+    return {
+        "status": "ok",
+        "server": "ha-mcp-server",
+        "version": "6.3",
+        "endpoints": {
+            "sse": "/sse",
+            "mcp": "/mcp",
+            "health": "/health"
+        },
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "message": "MCP Server is ready for connections"
+    }
+
 @app.options("/sse")
 async def sse_options():
     """Handle CORS preflight requests for SSE endpoint"""
@@ -893,7 +909,20 @@ async def sse_options():
         headers={
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET, OPTIONS",
-            "Access-Control-Allow-Headers": "Cache-Control,Content-Type,Authorization",
+            "Access-Control-Allow-Headers": "Cache-Control,Content-Type,Authorization,Accept",
+            "Access-Control-Max-Age": "86400"
+        }
+    )
+
+@app.options("/mcp-test")
+async def mcp_test_options():
+    """Handle CORS preflight requests for test endpoint"""
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Cache-Control,Content-Type,Authorization,Accept",
             "Access-Control-Max-Age": "86400"
         }
     )
@@ -906,6 +935,8 @@ async def sse_endpoint(request: Request):
     
     logger.info(f"🔗 HA MCP Client connected via /sse: {client_id}")
     logger.info(f"🌍 Client headers: {dict(request.headers)}")
+    logger.info(f"🔍 Client info: {request.client.host if request.client else 'unknown'}:{request.client.port if request.client else 'unknown'}")
+    logger.info(f"🌐 Request URL: {request.url}")
     
     async def generate_mcp_events():
         try:
@@ -920,12 +951,15 @@ async def sse_endpoint(request: Request):
                     },
                     "serverInfo": {
                         "name": "ha-mcp-server",
-                        "version": "6.2"
+                        "version": "6.3"
                     }
                 }
             }
             yield f"data: {json.dumps(init_event)}\n\n"
             logger.info("🔄 Sent initialization event to HA MCP Client")
+            
+            # Small delay to ensure proper initialization
+            await asyncio.sleep(0.1)
             
             # Send tools list
             if mcp_server_instance:
@@ -945,6 +979,9 @@ async def sse_endpoint(request: Request):
                 }
                 yield f"data: {json.dumps(tools_event)}\n\n"
                 logger.info(f"🛠️ Sent {len(mcp_server_instance.tools)} tools to HA MCP Client")
+                
+                # Small delay after sending tools
+                await asyncio.sleep(0.1)
             
             # Keep connection alive with pings
             sequence = 0
@@ -978,12 +1015,14 @@ async def sse_endpoint(request: Request):
         generate_mcp_events(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
             "Connection": "keep-alive",
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Cache-Control,Content-Type,Authorization",
+            "Access-Control-Allow-Headers": "Cache-Control,Content-Type,Authorization,Accept",
             "Access-Control-Allow-Methods": "GET,OPTIONS",
-            "X-Accel-Buffering": "no"  # Disable nginx buffering
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+            "Pragma": "no-cache",
+            "Expires": "0"
         }
     )
 
@@ -1024,7 +1063,7 @@ async def startup_event():
     global mcp_server_instance
     
     logger.info("🚀 Starting Home Assistant MCP Server")
-    logger.info("📦 Version: 6.2")
+    logger.info("📦 Version: 6.3")
     logger.info("🔧 Using SSE transport with official MCP SDK")
     
     # Initialize database connection
@@ -1059,6 +1098,11 @@ if __name__ == "__main__":
     logger.info(f"   - http://addon_mcp_server:8099/sse")
     logger.info(f"   - http://a0d7b954-mcp-server:8099/sse")
     logger.info(f"   - http://homeassistant.local:8099/sse")
+    logger.info(f"")
+    logger.info(f"⚠️  IMPORTANT: Use HTTP (not HTTPS) URLs in MCP Client configuration")
+    logger.info(f"🔒 SSL/TLS is not required for local Home Assistant add-ons")
+    logger.info(f"🧪 Test connectivity: http://localhost:{MCP_PORT}/mcp-test")
+    logger.info(f"")
     uvicorn.run(
         app, 
         host="0.0.0.0", 
